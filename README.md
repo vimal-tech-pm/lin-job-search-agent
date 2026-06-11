@@ -11,7 +11,7 @@ Lin turns job postings into tailored, submit-ready application packages and trac
 - 📦 **Finalize**: ATS comparison picks the winner; application answers drafted; recruiter-named PDF packaged
 - 📊 **Dashboard**: funnel-rail navigation, one sortable table, bulk actions, settings page, dark/light personalities — one self-contained HTML + a tiny local control server
 
-🎭 **[Live demo (fictional data)](https://lin-demo-axj.pages.dev/)** · 📖 Case studies: see the project page
+🎭 **[Live demo (fictional data)](https://lin-job-search-agent.pages.dev/demo/)** · 🌐 **[Project page](https://lin-job-search-agent.pages.dev/)** · 📖 [Case studies](https://vimalsekar-portfolio.pages.dev/work/lin/)
 
 ## Why it's shaped this way
 
