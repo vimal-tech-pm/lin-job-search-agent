@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "_comment": "Caps/thresholds for the Lin pipeline. Models live per-job in cron jobs.",
+  "canada_block_values": [
+    "no"
+  ],
+  "promote_threshold": 3.95,
+  "promote_limit": 25,
+  "prepare_retry_budget": 1,
+  "auto_build_floor": 4.2,
+  "auto_build_top_n": 3,
+  "daily": {
+    "scan_cap": 200,
+    "scan_linkedin_cap": 50,
+    "scan_indeed_cap": 50,
+    "scan_gmail_cap": 50,
+    "scan_manual_cap": 50,
+    "score_cap": 100,
+    "prepare_cap": 20
+  },
+  "greenfield": {
+    "score_cap": 100,
+    "score_timebox_min": 120,
+    "prepare_cap": 25
+  },
+  "deep_prep_threshold": 3.8,
+  "deep_prep_cap": 20
+}

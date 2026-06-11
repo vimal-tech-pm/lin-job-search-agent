@@ -1,0 +1,18 @@
+{
+  "name": "resume-factory",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Single-runtime resume exporter: Markdown -> validated DOCX (docx) + PDF (Playwright/Chromium)",
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=10.0.0"
+  },
+  "scripts": {
+    "build:js": "node scripts/build-resume.js",
+    "postinstall": "playwright install chromium"
+  },
+  "dependencies": {
+    "docx": "9.6.1",
+    "playwright": "^1.58.1"
+  }
+}

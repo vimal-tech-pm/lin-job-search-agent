@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{{NAME}} — Resume</title>
+<style>
+  /* ─── Font stack ────────────────────────────────────────────────
+     We bundle all four Carlito variants (OFL-licensed, metric-compatible
+     with Calibri) and load them directly. We intentionally do NOT use
+     local("Calibri") fallbacks: on Linux, fontconfig aliases Calibri to
+     any installed Carlito variant, and if only Carlito-Bold is present
+     system-wide the Regular/Italic weights collapse to Bold. Loading the
+     bundled TTFs keeps rendering deterministic across machines.
+  ─────────────────────────────────────────────────────────────── */
+  @font-face {
+    font-family: "Calibri";
+    font-style: normal;
+    font-weight: 400;
+    src: url("./fonts/Carlito-Regular.ttf") format("truetype");
+  }
+  @font-face {
+    font-family: "Calibri";
+    font-style: italic;
+    font-weight: 400;
+    src: url("./fonts/Carlito-Italic.ttf") format("truetype");
+  }
+  @font-face {
+    font-family: "Calibri";
+    font-style: normal;
+    font-weight: 700;
+    src: url("./fonts/Carlito-Bold.ttf") format("truetype");
+  }
+  @font-face {
+    font-family: "Calibri";
+    font-style: italic;
+    font-weight: 700;
+    src: url("./fonts/Carlito-BoldItalic.ttf") format("truetype");
+  }
+
+  /* ─── Theme variables (injected from THEMES[executive-clean] at render time) ─── */
+  :root {
+    --accent: {{COLOR_ACCENT}};
+    --metric: {{COLOR_METRIC}};
+    --text-dark: {{COLOR_TEXT_DARK}};
+    --text-body: {{COLOR_TEXT_BODY}};
+    --text-secondary: {{COLOR_TEXT_SECONDARY}};
+
+    --size-name: {{SIZE_NAME}}pt;
+    --size-title: {{SIZE_TITLE}}pt;
+    --size-tagline: {{SIZE_TAGLINE}}pt;
+    --size-contact: {{SIZE_CONTACT}}pt;
+    --size-section: {{SIZE_SECTION}}pt;
+    --size-job-title: {{SIZE_JOB_TITLE}}pt;
+    --size-company: {{SIZE_COMPANY}}pt;
+    --size-company-location: {{SIZE_COMPANY_LOCATION}}pt;
+    --size-body: {{SIZE_BODY}}pt;
+    --size-date: {{SIZE_DATE}}pt;
+    --size-ach-metric: {{SIZE_ACH_METRIC}}pt;
+    --size-ach-context: {{SIZE_ACH_CONTEXT}}pt;
+    --size-edu-degree: {{SIZE_EDU_DEGREE}}pt;
+    --size-edu-inst: {{SIZE_EDU_INST}}pt;
+
+    --bullet-indent: {{BULLET_INDENT}}in;
+  }
+
+  /* ─── Reset + print safety ─── */
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    font-family: "Calibri", "Carlito", Arial, sans-serif;
+    font-size: var(--size-body);
+    line-height: 1.25;
+    color: var(--text-body);
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  @page {
+    size: letter;
+    margin: 0;
+  }
+  @media print {
+    html, body {
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    .role, .degree, .achievements, .skills-list {
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+    h2 {
+      break-after: avoid;
+      page-break-after: avoid;
+    }
+    p, li {
+      widows: 2;
+      orphans: 2;
+    }
+  }
+
+  /* ─── Header block (centered) ─── */
+  header.resume-header {
+    text-align: center;
+  }
+  h1.name {
+    font-size: var(--size-name);
+    font-weight: 700;
+    color: var(--text-dark);
+    margin: 0;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+  }
+  .title {
+    font-size: var(--size-title);
+    color: var(--text-body);
+    margin: 1pt 0 0.5pt 0;
+  }
+  .tagline {
+    font-size: var(--size-tagline);
+    color: var(--text-secondary);
+    margin: 0;
+    padding-bottom: 2pt;
+    border-bottom: 0.75pt solid var(--accent);
+  }
+  .contact {
+    font-size: var(--size-contact);
+    color: var(--text-secondary);
+    margin: 2.5pt 0 2pt 0;
+  }
+  .contact a {
+    color: var(--text-secondary);
+    text-decoration: none;
+  }
+  .contact .sep {
+    display: inline-block;
+    padding: 0 6pt;
+  }
+
+  /* ─── Section headers ─── */
+  h2.section-header {
+    font-size: var(--size-section);
+    font-weight: 700;
+    color: var(--text-body);
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    margin: 12pt 0 3pt 0;
+    padding-bottom: 2pt;
+    border-bottom: 0.5pt solid var(--accent);
+  }
+
+  /* ─── Professional Summary ─── */
+  p.summary {
+    font-size: var(--size-body);
+    color: var(--text-body);
+    margin: 1.5pt 0 2pt 0;
+  }
+
+  /* ─── Key Achievements (centered grid of pipe-separated rows) ─── */
+  .achievements {
+    text-align: center;
+    margin: 1.5pt 0 2pt 0;
+  }
+  .achievements .row {
+    margin: 0;
+    padding: 0;
+  }
+  .achievements .row + .row {
+    margin-top: 0.5pt;
+  }
+  .achievements .metric {
+    font-size: var(--size-ach-metric);
+    font-weight: 700;
+    color: var(--metric);
+  }
+  .achievements .context {
+    font-size: var(--size-ach-context);
+    color: var(--text-secondary);
+    margin-left: 3pt;
+  }
+  .achievements .pipe {
+    display: inline-block;
+    padding: 0 10pt;
+    color: var(--text-secondary);
+  }
+
+  /* ─── Skills & Tools ─── */
+  .skills-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .skills-list li {
+    margin: 1pt 0;
+    font-size: var(--size-body);
+    color: var(--text-body);
+  }
+  .skills-list .category {
+    font-weight: 700;
+    color: var(--text-dark);
+  }
+
+  /* ─── Professional Experience ─── */
+  .role {
+    margin: 8pt 0 0 0;
+  }
+  .role + .role {
+    margin-top: 8pt;
+  }
+  .role-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin: 0;
+  }
+  .role-head .job-title {
+    font-size: var(--size-job-title);
+    font-weight: 700;
+    color: var(--text-dark);
+  }
+  .role-head .date {
+    font-size: var(--size-date);
+    color: var(--text-secondary);
+    white-space: nowrap;
+    margin-left: 12pt;
+  }
+  .role .company-line {
+    font-size: var(--size-company);
+    font-style: italic;
+    color: var(--text-body);
+    margin: 0.5pt 0 2.5pt 0;
+  }
+  .role .company-line .location {
+    font-size: var(--size-company-location);
+    color: var(--text-secondary);
+    font-style: italic;
+  }
+
+  /* ─── Bullets (for experience + certifications) ─── */
+  ul.bullets {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  ul.bullets li {
+    position: relative;
+    padding-left: var(--bullet-indent);
+    margin: 1.5pt 0;
+    font-size: var(--size-body);
+    color: var(--text-body);
+  }
+  ul.bullets li::before {
+    content: "\2022";
+    position: absolute;
+    left: 0;
+    width: var(--bullet-indent);
+    text-align: left;
+    padding-left: 2pt;
+    color: var(--text-body);
+  }
+  ul.bullets li strong {
+    color: var(--text-dark);
+    font-weight: 700;
+  }
+
+  /* ─── Education ─── */
+  .degree {
+    margin: 4pt 0 0 0;
+  }
+  .degree-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin: 0;
+  }
+  .degree-head .name {
+    font-size: var(--size-edu-degree);
+    font-weight: 700;
+    color: var(--text-dark);
+    /* override the h1.name uppercase */
+    text-transform: none;
+    letter-spacing: 0;
+  }
+  .degree-head .date {
+    font-size: var(--size-date);
+    color: var(--text-secondary);
+    white-space: nowrap;
+    margin-left: 12pt;
+  }
+  .degree .institution {
+    font-size: var(--size-edu-inst);
+    font-style: italic;
+    color: var(--text-body);
+    margin: 0.5pt 0 1.5pt 0;
+  }
+
+  /* ─── Page body container sets the visible margins (driven by @page top/right/bottom/left via CSS) ─── */
+  .page {
+    padding: {{MARGIN_TOP}}in {{MARGIN_RIGHT}}in {{MARGIN_BOTTOM}}in {{MARGIN_LEFT}}in;
+  }
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="resume-header">
+    <h1 class="name">{{NAME}}</h1>
+    <p class="title">{{TITLE}}</p>
+    <p class="tagline">{{TAGLINE}}</p>
+    <p class="contact">{{CONTACT_HTML}}</p>
+  </header>
+
+  <main>
+    {{SECTIONS_HTML}}
+  </main>
+</div>
+</body>
+</html>

@@ -1,0 +1,9 @@
+# Tracked companies + portal search vocabulary. REPLACE with your targets.
+tracked_companies:
+  - name: Example Corp
+    careers_url: https://example.com/careers
+title_filter:
+  positive: ["product manager", "senior product manager"]
+  negative: ["intern"]
+search_queries:
+  - "senior product manager remote"

@@ -1,0 +1,530 @@
+#!/usr/bin/env node
+
+/**
+ * update-system-candidate.mjs — Safe auto-updater for interview-coach-skill
+ *
+ * Updates ONLY system layer files (CLAUDE.md, AGENTS.md, references/,
+ * resume-factory/, scripts/, releases/, archive/, docs, VERSION, etc.).
+ * NEVER touches user data (memory/coaching_state.md, source_files/,
+ * applications/active|archive/, plans/).
+ *
+ * Works in two modes:
+ *   - Git mode: when the repo has a .git/ folder (the candidate's dev machine, or
+ *     a target that kept git after pendrive copy). Uses `git fetch` +
+ *     selective checkout.
+ *   - Filesystem mode: when .git/ has been deleted (per instruction-new.md,
+ *     the recipient on another laptop typically removes it). Shallow-clones
+ *     the canonical repo into a temp dir and copies system files over.
+ *
+ * In either mode, a pre-update snapshot of every file about to change is
+ * copied into `.update-backups/<ISO-timestamp>/` so `rollback` works without
+ * needing git.
+ *
+ * Usage:
+ *   node scripts/update-system-candidate.mjs check      # Check if update available
+ *   node scripts/update-system-candidate.mjs apply      # Apply update (after user confirms)
+ *   node scripts/update-system-candidate.mjs rollback   # Rollback last update
+ *   node scripts/update-system-candidate.mjs dismiss    # Dismiss update check
+ */
+
+import { execFileSync, execSync } from 'child_process';
+import {
+  readFileSync,
+  writeFileSync,
+  existsSync,
+  unlinkSync,
+  mkdirSync,
+  readdirSync,
+  statSync,
+  copyFileSync,
+  rmSync,
+} from 'fs';
+import { join, dirname, relative, resolve } from 'path';
+import { fileURLToPath } from 'url';
+import { tmpdir } from 'os';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const ROOT = resolve(__dirname, '..');
+
+const CANONICAL_REPO = 'https://github.com/candidate-tech-pm/interview-coach-skill.git';
+const RAW_VERSION_URL = 'https://raw.githubusercontent.com/candidate-tech-pm/interview-coach-skill/main/VERSION';
+const RELEASES_API = 'https://api.github.com/repos/candidate-tech-pm/interview-coach-skill/releases/latest';
+
+const BACKUP_ROOT = join(ROOT, '.update-backups');
+const LOCK_FILE = join(ROOT, '.update-lock');
+const DISMISS_FILE = join(ROOT, '.update-dismissed');
+
+// System files with allowed local customizations — skipped even if a
+// parent directory is listed in SYSTEM_PATHS.
+const LOCAL_PROTECTED = [
+  'scripts/update-system-candidate.mjs', // never overwrite the running updater
+  'resume-factory/themes/',          // user-customized resume themes
+  'resume-factory/templates/',       // user-customized resume templates
+  '.claude/settings.local.json',     // per-machine overrides
+];
+
+// System layer paths — ONLY these get updated.
+const SYSTEM_PATHS = [
+  'CLAUDE.md',
+  'AGENTS.md',
+  'README.md',
+  'VERSIONS.md',
+  'LICENSE',
+  'instruction-new.md',
+  '.gitignore',
+  '.codex',
+  'VERSION',
+  'references/',
+  'releases/',
+  'archive/',
+  'scripts/',
+  'resume-factory/',
+  'applications/README.md',
+  'memory/README.md',
+];
+
+// User layer paths — NEVER touch these (safety net).
+const USER_PATHS = [
+  'memory/coaching_state.md',
+  'memory/interview_tracker.md',
+  'source_files/',
+  'applications/active/',
+  'applications/archive/',
+  'plans/',
+  '.update-backups/',
+  '.update-lock',
+  '.update-dismissed',
+];
+
+// Paths that should never be pulled from upstream even if they somehow
+// appear under a SYSTEM_PATHS directory.
+const NEVER_COPY = [
+  'resume-factory/node_modules/',
+  '.git/',
+];
+
+// ── UTILITIES ───────────────────────────────────────────────────
+
+function localVersion() {
+  const vPath = join(ROOT, 'VERSION');
+  return existsSync(vPath) ? readFileSync(vPath, 'utf-8').trim() : '0.0.0';
+}
+
+function compareVersions(a, b) {
+  const pa = a.split('.').map(Number);
+  const pb = b.split('.').map(Number);
+  for (let i = 0; i < 3; i++) {
+    if ((pa[i] || 0) < (pb[i] || 0)) return -1;
+    if ((pa[i] || 0) > (pb[i] || 0)) return 1;
+  }
+  return 0;
+}
+
+function normalizeRepoPath(p) {
+  return p.replace(/\\/g, '/').replace(/\/+$/, '');
+}
+
+function isDirectoryPath(p) {
+  return p.endsWith('/');
+}
+
+function matchesPrefix(file, candidate) {
+  const f = normalizeRepoPath(file);
+  const c = normalizeRepoPath(candidate);
+  return f === c || f.startsWith(`${c}/`);
+}
+
+function isLocalProtected(file) {
+  return LOCAL_PROTECTED.some(p => matchesPrefix(file, p));
+}
+
+function isUserPath(file) {
+  return USER_PATHS.some(p => matchesPrefix(file, p));
+}
+
+function isNeverCopy(file) {
+  return NEVER_COPY.some(p => matchesPrefix(file, p));
+}
+
+function pushUnique(list, value) {
+  if (!list.includes(value)) list.push(value);
+}
+
+function git(cwd, ...args) {
+  return execFileSync('git', args, { cwd, encoding: 'utf-8', timeout: 60000 }).trim();
+}
+
+function ensureDir(dir) {
+  mkdirSync(dir, { recursive: true });
+}
+
+function copyFileWithDirs(srcAbs, destAbs) {
+  ensureDir(dirname(destAbs));
+  copyFileSync(srcAbs, destAbs);
+}
+
+function walkFiles(rootAbs) {
+  const out = [];
+  if (!existsSync(rootAbs)) return out;
+  const stack = [rootAbs];
+  while (stack.length) {
+    const cur = stack.pop();
+    const s = statSync(cur);
+    if (s.isDirectory()) {
+      for (const entry of readdirSync(cur)) stack.push(join(cur, entry));
+    } else if (s.isFile()) {
+      out.push(cur);
+    }
+  }
+  return out;
+}
+
+function makeTimestamp() {
+  return new Date().toISOString().replace(/[:.]/g, '-');
+}
+
+// Expand SYSTEM_PATHS against a given source tree into a concrete list
+// of relative file paths that should be copied, already filtered for
+// LOCAL_PROTECTED and NEVER_COPY.
+function resolveSystemFiles(sourceRoot) {
+  const files = [];
+  for (const entry of SYSTEM_PATHS) {
+    const clean = normalizeRepoPath(entry);
+    const abs = join(sourceRoot, clean);
+    if (!existsSync(abs)) continue;
+    const s = statSync(abs);
+    if (s.isFile()) {
+      files.push(clean);
+    } else if (s.isDirectory()) {
+      for (const fAbs of walkFiles(abs)) {
+        const rel = relative(sourceRoot, fAbs).split('\\').join('/');
+        files.push(rel);
+      }
+    }
+  }
+  // Dedupe + filter.
+  const seen = new Set();
+  const result = [];
+  for (const f of files) {
+    if (seen.has(f)) continue;
+    seen.add(f);
+    if (isLocalProtected(f)) continue;
+    if (isNeverCopy(f)) continue;
+    if (isUserPath(f)) continue; // defense in depth
+    result.push(f);
+  }
+  return result;
+}
+
+function snapshotFile(relPath, backupDir) {
+  const src = join(ROOT, relPath);
+  if (!existsSync(src)) return false;
+  const dest = join(backupDir, relPath);
+  copyFileWithDirs(src, dest);
+  return true;
+}
+
+function fileDigest(absPath) {
+  // Lightweight "fingerprint" for USER_PATHS tamper check: size + mtimeMs.
+  if (!existsSync(absPath)) return 'absent';
+  const s = statSync(absPath);
+  return `${s.size}:${s.mtimeMs}`;
+}
+
+function snapshotUserLayer() {
+  const snap = new Map();
+  for (const entry of USER_PATHS) {
+    const clean = normalizeRepoPath(entry);
+    const abs = join(ROOT, clean);
+    if (!existsSync(abs)) continue;
+    const s = statSync(abs);
+    if (s.isFile()) {
+      snap.set(clean, fileDigest(abs));
+    } else if (s.isDirectory()) {
+      for (const fAbs of walkFiles(abs)) {
+        const rel = relative(ROOT, fAbs).split('\\').join('/');
+        snap.set(rel, fileDigest(fAbs));
+      }
+    }
+  }
+  return snap;
+}
+
+function diffUserLayer(before) {
+  const after = snapshotUserLayer();
+  const touched = [];
+  for (const [rel, sig] of before.entries()) {
+    if (after.get(rel) !== sig) touched.push(rel);
+  }
+  for (const [rel, sig] of after.entries()) {
+    if (!before.has(rel)) touched.push(rel);
+  }
+  return touched;
+}
+
+function restoreFromBackup(backupDir) {
+  const files = walkFiles(backupDir);
+  for (const abs of files) {
+    const rel = relative(backupDir, abs).split('\\').join('/');
+    if (isLocalProtected(rel)) continue;
+    copyFileWithDirs(abs, join(ROOT, rel));
+  }
+}
+
+// ── CHECK ───────────────────────────────────────────────────────
+
+async function check() {
+  if (existsSync(DISMISS_FILE)) {
+    console.log(JSON.stringify({ status: 'dismissed' }));
+    return;
+  }
+
+  const local = localVersion();
+  let remote;
+
+  try {
+    const res = await fetch(RAW_VERSION_URL);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    remote = (await res.text()).trim();
+  } catch {
+    console.log(JSON.stringify({ status: 'offline', local }));
+    return;
+  }
+
+  if (compareVersions(local, remote) >= 0) {
+    console.log(JSON.stringify({ status: 'up-to-date', local, remote }));
+    return;
+  }
+
+  let changelog = '';
+  try {
+    const res = await fetch(RELEASES_API, {
+      headers: { Accept: 'application/vnd.github.v3+json' },
+    });
+    if (res.ok) {
+      const release = await res.json();
+      changelog = release.body || '';
+    }
+  } catch {
+    // No changelog is fine.
+  }
+
+  console.log(JSON.stringify({
+    status: 'update-available',
+    local,
+    remote,
+    changelog: changelog.slice(0, 500),
+  }));
+}
+
+// ── APPLY ───────────────────────────────────────────────────────
+
+async function apply() {
+  if (existsSync(LOCK_FILE)) {
+    console.error('Update already in progress (.update-lock exists). If stuck, delete it manually.');
+    process.exit(1);
+  }
+  writeFileSync(LOCK_FILE, new Date().toISOString());
+
+  const timestamp = makeTimestamp();
+  const backupDir = join(BACKUP_ROOT, timestamp);
+  const userBefore = snapshotUserLayer();
+  let sourceDir = null; // temp clone dir (filesystem mode)
+  let usedGitCheckout = false;
+
+  try {
+    const local = localVersion();
+
+    // Decide mode: git vs filesystem.
+    const hasGit = existsSync(join(ROOT, '.git'));
+
+    // 1. Stage the update source.
+    if (hasGit) {
+      console.log('Fetching latest from upstream via git...');
+      try {
+        git(ROOT, 'fetch', CANONICAL_REPO, 'main');
+        usedGitCheckout = true;
+      } catch (err) {
+        console.log(`git fetch failed (${err.message.split('\n')[0]}); falling back to shallow clone.`);
+      }
+    }
+
+    if (!usedGitCheckout) {
+      sourceDir = join(tmpdir(), `ico-update-${timestamp}`);
+      console.log(`Shallow-cloning ${CANONICAL_REPO} to ${sourceDir}...`);
+      execFileSync('git', ['clone', '--depth', '1', '--branch', 'main', CANONICAL_REPO, sourceDir], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        timeout: 180000,
+      });
+    }
+
+    // 2. Resolve concrete file list from the upstream source tree.
+    const upstreamRoot = usedGitCheckout ? ROOT : sourceDir;
+    // In git mode we can't walk FETCH_HEAD directly via fs; use git ls-tree.
+    let systemFiles;
+    if (usedGitCheckout) {
+      systemFiles = resolveSystemFilesFromGit('FETCH_HEAD');
+    } else {
+      systemFiles = resolveSystemFiles(upstreamRoot);
+    }
+
+    if (systemFiles.length === 0) {
+      console.error('No system files resolved from upstream. Aborting.');
+      process.exit(1);
+    }
+
+    // 3. Safety scan: no file about to be written may fall into USER_PATHS.
+    const violations = systemFiles.filter(isUserPath);
+    if (violations.length) {
+      console.error('SAFETY VIOLATION: upstream file list includes user paths:');
+      for (const v of violations) console.error(`  - ${v}`);
+      process.exit(1);
+    }
+
+    // 4. Snapshot current on-disk versions of everything we're about to
+    //    touch, into .update-backups/<ts>/.
+    ensureDir(backupDir);
+    let snapshotted = 0;
+    for (const rel of systemFiles) {
+      if (snapshotFile(rel, backupDir)) snapshotted++;
+    }
+    console.log(`Snapshotted ${snapshotted} existing file(s) to ${relative(ROOT, backupDir)}/`);
+
+    // 5. Apply the update.
+    const updated = [];
+    const skipped = [];
+    if (usedGitCheckout) {
+      for (const rel of systemFiles) {
+        if (isLocalProtected(rel)) { pushUnique(skipped, rel); continue; }
+        try {
+          git(ROOT, 'checkout', 'FETCH_HEAD', '--', rel);
+          pushUnique(updated, rel);
+        } catch {
+          // File may not exist remotely anymore; leave local alone.
+        }
+      }
+    } else {
+      for (const rel of systemFiles) {
+        if (isLocalProtected(rel)) { pushUnique(skipped, rel); continue; }
+        const src = join(sourceDir, rel);
+        const dest = join(ROOT, rel);
+        if (!existsSync(src)) continue;
+        copyFileWithDirs(src, dest);
+        pushUnique(updated, rel);
+      }
+    }
+
+    if (skipped.length) {
+      console.log(`Skipped (locally protected): ${skipped.join(', ')}`);
+    }
+
+    // 6. Verify no user files were touched.
+    const touchedUser = diffUserLayer(userBefore);
+    if (touchedUser.length) {
+      console.error('SAFETY VIOLATION: user files were modified during update:');
+      for (const f of touchedUser) console.error(`  - ${f}`);
+      console.error('Rolling back from snapshot...');
+      restoreFromBackup(backupDir);
+      process.exit(1);
+    }
+
+    // 7. Clear dismiss marker so future update prompts re-appear.
+    if (existsSync(DISMISS_FILE)) unlinkSync(DISMISS_FILE);
+
+    // 8. Summary.
+    const remote = localVersion(); // re-read after VERSION refresh
+    console.log('');
+    console.log(`Update complete: v${local} → v${remote}`);
+    console.log(`Updated ${updated.length} system path(s).`);
+    console.log(`Backup: ${relative(ROOT, backupDir)}/`);
+    console.log('Rollback available: node scripts/update-system-candidate.mjs rollback');
+
+    // 9. Hint about resume-factory deps if its package.json changed.
+    if (updated.includes('resume-factory/package.json')) {
+      console.log('');
+      console.log('Note: resume-factory/package.json changed.');
+      console.log('      Run `(cd resume-factory && npm install)` when convenient.');
+    }
+  } finally {
+    if (existsSync(LOCK_FILE)) unlinkSync(LOCK_FILE);
+    if (sourceDir && existsSync(sourceDir)) {
+      try { rmSync(sourceDir, { recursive: true, force: true }); } catch { /* best effort */ }
+    }
+  }
+}
+
+// Git-mode equivalent of resolveSystemFiles: expand SYSTEM_PATHS into the
+// set of files present at FETCH_HEAD, filtered for LOCAL_PROTECTED /
+// NEVER_COPY / USER_PATHS.
+function resolveSystemFilesFromGit(ref) {
+  const files = new Set();
+  for (const entry of SYSTEM_PATHS) {
+    const clean = normalizeRepoPath(entry);
+    let listed;
+    try {
+      listed = git(ROOT, 'ls-tree', '-r', '--name-only', ref, '--', clean);
+    } catch {
+      continue;
+    }
+    if (!listed) continue;
+    for (const line of listed.split('\n')) {
+      const f = line.trim();
+      if (!f) continue;
+      if (isLocalProtected(f)) continue;
+      if (isNeverCopy(f)) continue;
+      if (isUserPath(f)) continue;
+      files.add(f);
+    }
+  }
+  return [...files];
+}
+
+// ── ROLLBACK ────────────────────────────────────────────────────
+
+function rollback() {
+  if (!existsSync(BACKUP_ROOT)) {
+    console.error('No .update-backups/ folder found. Nothing to rollback.');
+    process.exit(1);
+  }
+  const entries = readdirSync(BACKUP_ROOT)
+    .filter(name => {
+      try { return statSync(join(BACKUP_ROOT, name)).isDirectory(); } catch { return false; }
+    })
+    .sort()
+    .reverse();
+
+  if (entries.length === 0) {
+    console.error('No backup snapshots found. Nothing to rollback.');
+    process.exit(1);
+  }
+
+  const latest = entries[0];
+  const backupDir = join(BACKUP_ROOT, latest);
+  console.log(`Rolling back from snapshot: ${latest}`);
+
+  restoreFromBackup(backupDir);
+
+  console.log(`Rollback complete. System files restored from ${latest}.`);
+  console.log('Your coaching memory, resume, and applications were not affected.');
+}
+
+// ── DISMISS ─────────────────────────────────────────────────────
+
+function dismiss() {
+  writeFileSync(DISMISS_FILE, new Date().toISOString());
+  console.log('Update check dismissed. Run `node scripts/update-system-candidate.mjs check` or say "check for updates" to re-enable.');
+}
+
+// ── MAIN ────────────────────────────────────────────────────────
+
+const cmd = process.argv[2] || 'check';
+
+switch (cmd) {
+  case 'check': await check(); break;
+  case 'apply': await apply(); break;
+  case 'rollback': rollback(); break;
+  case 'dismiss': dismiss(); break;
+  default:
+    console.log('Usage: node scripts/update-system-candidate.mjs [check|apply|rollback|dismiss]');
+    process.exit(1);
+}

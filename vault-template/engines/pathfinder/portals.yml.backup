@@ -1,0 +1,1667 @@
+# Portal Scanner Configuration
+# Used by /career-ops scan to discover new offers automatically.
+#
+# Strategy (3 levels):
+#   1. Playwright → careers_url of each company (real-time, reliable)
+#   2. Greenhouse API → structured JSON (fast, Greenhouse-only)
+#   3. WebSearch with site: filters (broad discovery, may be stale)
+#
+# IMPORTANT: Each company in tracked_companies MUST have careers_url.
+#
+# HOW TO CUSTOMIZE:
+#   1. Copy this file to portals.yml in the project root
+#   2. Edit title_filter.positive with YOUR target role keywords
+#   3. Add/remove companies in tracked_companies
+#   4. Adjust search_queries for your preferred job boards
+#   5. Set enabled: false on companies you don't care about
+
+# -- Title filter --
+# The scanner uses these keywords to decide if a title is relevant.
+# At least 1 positive must match AND 0 negatives must match (case-insensitive).
+
+title_filter:
+  positive:
+    # [CUSTOMIZE] Product roles aligned to the current target search
+    - "Senior Product Manager"
+    - "Product Manager"
+    - "AI Product Manager"
+    - "Technical Product Manager"
+    - "Platform Product Manager"
+    - "Product Owner"
+  negative:
+    # [CUSTOMIZE] Exclude adjacent roles that add noise to the scan
+    - "Junior"
+    - "Intern"
+    - "Associate Product Manager"
+    - "APM"
+    - "Project Manager"
+    - "Program Manager"
+    - "Scrum Master"
+    - "Business Analyst"
+    - "Product Designer"
+    - "UX"
+    - "UI"
+    - "Marketing"
+    - "Growth Marketing"
+    - "Sales"
+    - "Customer Success"
+    - "Account Manager"
+  seniority_boost:
+    # These prefixes add relevance but are not required
+    - "Senior"
+    - "Lead"
+    - "Principal"
+
+# -- Search queries --
+# Each query triggers a WebSearch. Use site: to filter by portal.
+# The scanner extracts title, URL, and company from results.
+
+search_queries:
+  # -- Ashby --
+  - name: Ashby — Senior Product Remote
+    query: 'site:jobs.ashbyhq.com "Senior Product Manager" OR "Technical Product Manager" OR "Platform Product Manager" remote'
+    enabled: true
+
+  - name: Ashby — Product Manager Remote
+    query: 'site:jobs.ashbyhq.com "Product Manager" remote'
+    enabled: true
+
+  - name: Ashby — AI Product Remote
+    query: 'site:jobs.ashbyhq.com "AI Product Manager" OR "Generative AI Product Manager" OR "Product Manager" AI remote'
+    enabled: true
+
+  - name: Ashby — Product Toronto
+    query: 'site:jobs.ashbyhq.com "Product Manager" Toronto'
+    enabled: true
+
+  - name: Ashby — Product Canada
+    query: 'site:jobs.ashbyhq.com "Product Manager" Canada'
+    enabled: true
+
+  # -- Greenhouse --
+  - name: Greenhouse — Senior Product Remote
+    query: 'site:boards.greenhouse.io OR site:job-boards.greenhouse.io "Senior Product Manager" OR "Technical Product Manager" OR "Platform Product Manager" remote'
+    enabled: true
+
+  - name: Greenhouse — Product Manager Remote
+    query: 'site:boards.greenhouse.io OR site:job-boards.greenhouse.io "Product Manager" remote'
+    enabled: true
+
+  - name: Greenhouse — AI Product Remote
+    query: 'site:boards.greenhouse.io OR site:job-boards.greenhouse.io "AI Product Manager" OR "Generative AI Product Manager" OR "Product Manager" AI remote'
+    enabled: true
+
+  - name: Greenhouse — Product Toronto
+    query: 'site:boards.greenhouse.io OR site:job-boards.greenhouse.io "Product Manager" Toronto'
+    enabled: true
+
+  - name: Greenhouse — Product Canada
+    query: 'site:boards.greenhouse.io OR site:job-boards.greenhouse.io "Product Manager" Canada'
+    enabled: true
+
+  # -- Lever --
+  - name: Lever — Senior Product Remote
+    query: 'site:jobs.lever.co "Senior Product Manager" OR "Technical Product Manager" OR "Platform Product Manager" remote'
+    enabled: true
+
+  - name: Lever — Product Manager Remote
+    query: 'site:jobs.lever.co "Product Manager" remote'
+    enabled: true
+
+  - name: Lever — AI Product Remote
+    query: 'site:jobs.lever.co "AI Product Manager" OR "Generative AI Product Manager" OR "Product Manager" AI remote'
+    enabled: true
+
+  - name: Lever — Product Toronto
+    query: 'site:jobs.lever.co "Product Manager" Toronto'
+    enabled: true
+
+  - name: Lever — Product Canada
+    query: 'site:jobs.lever.co "Product Manager" Canada'
+    enabled: true
+
+  # -- Long-tail direct boards --
+  - name: Wellfound — Startup Product Remote
+    query: 'site:wellfound.com "Senior Product Manager" OR "AI Product Manager" OR "Product Manager" remote'
+    enabled: true
+
+  - name: Workable — Product Canada/Remote
+    query: 'site:apply.workable.com "Senior Product Manager" OR "AI Product Manager" OR "Product Manager" Canada OR remote'
+    enabled: true
+
+  # -- Aggregators: enabled but lower-priority --
+  - name: LinkedIn — Senior Product NA
+    query: 'site:linkedin.com/jobs/view "Senior Product Manager" OR "Technical Product Manager" OR "Platform Product Manager" remote OR Toronto OR Canada'
+    enabled: true
+
+  - name: LinkedIn — Product Manager NA
+    query: 'site:linkedin.com/jobs/view "Product Manager" remote OR Toronto OR Canada'
+    enabled: true
+
+  - name: LinkedIn — AI Product NA
+    query: 'site:linkedin.com/jobs/view "AI Product Manager" OR "Generative AI Product Manager" OR "Product Manager" AI remote OR Toronto OR Canada'
+    enabled: true
+
+  - name: Indeed — Senior Product NA
+    query: 'site:indeed.com/viewjob OR site:ca.indeed.com/viewjob "Senior Product Manager" OR "Technical Product Manager" OR "Platform Product Manager" remote OR Toronto OR Canada'
+    enabled: true
+
+  - name: Indeed — Product Manager NA
+    query: 'site:indeed.com/viewjob OR site:ca.indeed.com/viewjob "Product Manager" remote OR Toronto OR Canada'
+    enabled: true
+
+  - name: Indeed — AI Product NA
+    query: 'site:indeed.com/viewjob OR site:ca.indeed.com/viewjob "AI Product Manager" OR "Generative AI Product Manager" OR "Product Manager" AI remote OR Toronto OR Canada'
+    enabled: true
+
+  # -- Fintech PM queries --
+  - name: Ashby — Fintech Product
+    query: 'site:jobs.ashbyhq.com "Product Manager" fintech OR lending OR payments OR banking'
+    enabled: true
+
+  - name: Greenhouse — Fintech Product
+    query: 'site:boards.greenhouse.io OR site:job-boards.greenhouse.io "Product Manager" fintech OR lending OR payments OR banking'
+    enabled: true
+
+  - name: Lever — Fintech Product
+    query: 'site:jobs.lever.co "Product Manager" fintech OR lending OR payments OR banking'
+    enabled: true
+
+  # -- Enterprise Platform PM queries --
+  - name: LinkedIn — Platform Product Manager Canada
+    query: 'site:linkedin.com/jobs/view "Platform Product Manager" OR "Senior Product Manager" Toronto OR Canada'
+    enabled: true
+
+  # -- Workday boards (banks use Workday ATS) --
+  - name: Workday — Product Manager Canada
+    query: 'site:myworkdayjobs.com "Product Manager" OR "Senior Product Manager" Canada OR Toronto'
+    enabled: true
+
+  # -- Product Owner (cross-portal) --
+  - name: Cross-Portal — Product Owner Canada
+    query: '"Product Owner" site:jobs.ashbyhq.com OR site:job-boards.greenhouse.io OR site:jobs.lever.co Toronto OR Canada'
+    enabled: true
+
+# -- Tracked companies --
+# Companies whose career pages are checked directly.
+# scan_method: playwright (default), websearch, greenhouse_api
+# For Greenhouse companies, add api: field for faster structured JSON access.
+
+tracked_companies:
+
+  # -- North America AI-Native PM Targets (additional) --
+
+  - name: Anduril
+    careers_url: https://www.anduril.com/careers
+    notes: "USA. Defense AI builder with frontier product scope."
+    enabled: true
+
+  # ============================================================================
+  # REFERENCE: Claude's Recommendation — Apply List (USA)
+  # These companies are listed in their respective category sections below.
+  # Kept here as a curated shortlist for quick reference.
+  # ----------------------------------------------------------------------------
+  # - OpenAI              → AI Labs & LLM providers
+  # - Anthropic           → AI Labs & LLM providers
+  # - Google              → North America Traditional Tech PM Targets
+  # - Meta                → North America Traditional Tech PM Targets
+  # - Microsoft           → North America Traditional Tech PM Targets
+  # - Amazon              → North America Traditional Tech PM Targets
+  # - NVIDIA              → North America Traditional Tech PM Targets
+  # - Databricks          → North America AI-Native PM Targets
+  # - Palantir            → Lever-based (Playwright direct)
+  # - Datadog             → Global SaaS PM Targets
+  # - Anduril             → North America AI-Native PM Targets (additional)
+  # - Perplexity          → North America AI-Native PM Targets
+  # - Snowflake           → Global SaaS PM Targets
+  # ============================================================================
+
+  # ============================================================================
+  # REFERENCE: Claude's Recommendation — Apply List (Canada)
+  # These companies are listed in their respective category sections below.
+  # ----------------------------------------------------------------------------
+  # - Cohere              → Canada Product & Tech Companies
+  # - Waabi               → Canada Product & Tech Companies
+  # - Clio                → Canada Product & Tech Companies
+  # - Shopify             → Canada Product & Tech Companies
+  # - Wealthsimple        → Canada Product & Tech Companies
+  # - Stripe              → North America Traditional Tech PM Targets
+  # - Uber                → North America Traditional Tech PM Targets
+  # ============================================================================
+
+  # ============================================================================
+  # REFERENCE: Claude's Recommendation — Do Not Apply (USA)
+  # These companies are redistributed to category sections below with warnings.
+  # ----------------------------------------------------------------------------
+  # - Atlassian           → Global SaaS PM Targets (⚠️ avoid: AI disruption)
+  # - Block               → USA Fintech & AI-Adjacent (⚠️ avoid: workforce contraction)
+  # - Salesforce           → Global SaaS PM Targets (⚠️ avoid: AI pressure + layoffs)
+  # - Workday             → Global SaaS PM Targets (⚠️ avoid: layoffs + AI pressure)
+  # - Chegg               → Global SaaS PM Targets (⚠️ avoid: severe AI disruption)
+  # - Twilio              → Global SaaS PM Targets (⚠️ avoid: PM org + disruption risk)
+  # - Five9               → Global SaaS PM Targets (⚠️ avoid: layoffs + AI pressure)
+  # - DocuSign            → Global SaaS PM Targets (⚠️ avoid: commoditization risk)
+  # - Intuit              → North America Traditional Tech (⚠️ avoid: AI replacement pressure)
+  # - Zoom                → Global SaaS PM Targets (⚠️ avoid: commoditization + layoffs)
+  # - Freshworks          → Global SaaS PM Targets (⚠️ avoid: slowing growth + AI risk)
+  # - Bumble              → Global SaaS PM Targets (⚠️ avoid: declining users/revenue)
+  # ============================================================================
+
+  # ============================================================================
+  # REFERENCE: Claude's Recommendation — Do Not Apply (Canada)
+  # These companies are redistributed to category sections below with warnings.
+  # ----------------------------------------------------------------------------
+  # - TELUS Digital        → Canada Product & Tech (⚠️ avoid: AI replacing core services)
+  # - OpenText            → Canada Product & Tech (⚠️ avoid: layoffs + revenue decline)
+  # - Klue                → Canada Product & Tech (⚠️ avoid: AI disruption + weak growth)
+  # - Hootsuite           → Canada Product & Tech (⚠️ avoid: layoffs + AI pressure)
+  # - Lightspeed          → Canada Product & Tech (⚠️ avoid: layoffs + weakening trajectory)
+  # - Dayforce            → Canada Product & Tech (⚠️ avoid: layoffs + PE ownership risk)
+  # - BlackBerry          → Canada Product & Tech (⚠️ avoid: restructuring + unclear trajectory)
+  # - TELUS Corporation   → Canada Product & Tech (⚠️ avoid: workforce cuts + weak earnings)
+  # - Thinkific           → Canada Product & Tech (⚠️ avoid: decline + AI commoditization)
+  # - Clearco             → Canadian Fintech (⚠️ avoid: valuation collapse + layoffs)
+  # - Tucows              → Canada Product & Tech (⚠️ avoid: workforce cuts + model stress)
+  # ============================================================================
+
+  # -- AI Labs & LLM providers --
+
+  - name: Anthropic
+    careers_url: https://job-boards.greenhouse.io/anthropic
+    api: https://boards-api.greenhouse.io/v1/boards/anthropic/jobs
+    enabled: true
+
+  - name: OpenAI
+    careers_url: https://openai.com/careers
+    scan_method: websearch
+    scan_query: 'site:openai.com/careers "Solutions" OR "Forward Deployed" OR "AI Engineer"'
+    enabled: true
+
+  # -- Voice AI & Conversational AI --
+
+  - name: PolyAI
+    careers_url: https://job-boards.eu.greenhouse.io/polyai
+    api: https://boards-api.greenhouse.io/v1/boards/polyai/jobs
+    notes: "UK. Voice AI for enterprise contact centers."
+    enabled: false
+
+  - name: Parloa
+    careers_url: https://job-boards.eu.greenhouse.io/parloa
+    api: https://boards-api.greenhouse.io/v1/boards/parloa/jobs
+    notes: "Berlin EMEA. Voice AI enterprise."
+    enabled: false
+
+  - name: Hume AI
+    careers_url: https://job-boards.greenhouse.io/humeai
+    api: https://boards-api.greenhouse.io/v1/boards/humeai/jobs
+    notes: "NYC. Empathic voice AI."
+    enabled: false
+
+  - name: ElevenLabs
+    careers_url: https://jobs.ashbyhq.com/elevenlabs
+    scan_method: websearch
+    scan_query: 'site:jobs.ashbyhq.com/elevenlabs'
+    notes: "Voice AI TTS leader."
+    enabled: false
+
+  - name: Deepgram
+    careers_url: https://jobs.ashbyhq.com/deepgram
+    scan_method: websearch
+    scan_query: 'site:deepgram.com/careers OR "deepgram" "Solutions" OR "AI Engineer" site:jobs.ashbyhq.com'
+    notes: "STT/TTS APIs."
+    enabled: false
+
+  - name: Vapi
+    careers_url: https://jobs.ashbyhq.com/vapi
+    scan_method: websearch
+    scan_query: 'site:jobs.ashbyhq.com/vapi'
+    notes: "Voice AI infrastructure."
+    enabled: false
+
+  - name: Bland AI
+    careers_url: https://jobs.ashbyhq.com/bland
+    scan_method: websearch
+    scan_query: 'site:jobs.ashbyhq.com/bland'
+    notes: "Voice phone agents. $65M Series B."
+    enabled: false
+
+  # -- AI-native platforms (FDE/SA teams) --
+
+  - name: Retool
+    careers_url: https://retool.com/careers
+    scan_method: websearch
+    scan_query: 'site:retool.com/careers "Deployed" OR "AI" OR "Solutions"'
+    notes: "London. Popularized Deployed Engineer role."
+    enabled: true
+
+  - name: Vercel
+    careers_url: https://job-boards.greenhouse.io/vercel
+    api: https://boards-api.greenhouse.io/v1/boards/vercel/jobs
+    notes: "AI SDK, v0.dev. Frontend AI tooling."
+    enabled: true
+
+  - name: Temporal
+    careers_url: https://job-boards.greenhouse.io/temporal
+    api: https://boards-api.greenhouse.io/v1/boards/temporal/jobs
+    notes: "Workflow orchestration."
+    enabled: true
+
+  - name: Arize AI
+    careers_url: https://job-boards.greenhouse.io/arizeai
+    api: https://boards-api.greenhouse.io/v1/boards/arizeai/jobs
+    notes: "LLMOps / AI observability."
+    enabled: true
+
+  - name: RunPod
+    careers_url: https://job-boards.greenhouse.io/runpod
+    api: https://boards-api.greenhouse.io/v1/boards/runpod/jobs
+    notes: "GPU cloud for AI."
+    enabled: true
+
+  - name: Glean
+    careers_url: https://job-boards.greenhouse.io/gleanwork
+    api: https://boards-api.greenhouse.io/v1/boards/gleanwork/jobs
+    notes: "Enterprise AI search."
+    enabled: true
+
+  # -- Contact Center AI & CX --
+
+  - name: LivePerson
+    careers_url: https://liveperson.com/company/careers
+    scan_method: websearch
+    scan_query: 'site:liveperson.com/careers OR "liveperson" "Solutions" OR "AI" site:job-boards.greenhouse.io'
+    notes: "Remote EMEA. Conversational AI enterprise."
+    enabled: false
+
+  - name: Sierra
+    careers_url: https://jobs.ashbyhq.com/sierra
+    scan_method: websearch
+    scan_query: '"sierra.ai" "AI" "Forward Deployed" OR "Applied" OR "Solutions" site:jobs.ashbyhq.com'
+    notes: "Bret Taylor (ex-CEO Salesforce). AI customer agents."
+    enabled: false
+
+  - name: Decagon
+    careers_url: https://jobs.ashbyhq.com/decagon
+    scan_method: websearch
+    scan_query: '"decagon" "AI" "Forward Deployed" OR "Solutions" site:jobs.ashbyhq.com'
+    notes: "AI customer support agents."
+    enabled: false
+
+  # -- Enterprise comms & contact center --
+
+  - name: Talkdesk
+    careers_url: https://www.talkdesk.com/careers
+    scan_method: websearch
+    scan_query: 'site:talkdesk.com/careers "AI" OR "Solutions Architect" OR "AI Engineer"'
+    notes: "Lisbon. Contact center AI. EMEA friendly."
+    enabled: false
+
+  # Twilio: redistributed to Global SaaS PM Targets (⚠️ AVOID)
+
+  - name: Dialpad
+    careers_url: https://www.dialpad.com/careers
+    scan_method: websearch
+    scan_query: '"dialpad" "AI" "Solutions" OR "Engineer" site:job-boards.greenhouse.io OR site:jobs.ashbyhq.com'
+    notes: "Voice AI for business comms."
+    enabled: false
+
+  - name: Gong
+    careers_url: https://www.gong.io/careers
+    scan_method: websearch
+    scan_query: 'site:gong.io/careers "AI" OR "Solutions" OR "Architect"'
+    notes: "Revenue intelligence with voice AI."
+    enabled: true
+
+  - name: Genesys
+    careers_url: https://www.genesys.com/careers
+    scan_method: websearch
+    scan_query: 'site:genesys.com/careers "AI" "Solutions Architect" OR "AI Engineer"'
+    notes: "Contact center cloud + AI."
+    enabled: false
+
+  # -- AI infra & LLMOps --
+
+  - name: Langfuse
+    careers_url: https://langfuse.com/careers
+    scan_method: websearch
+    scan_query: '"langfuse" careers OR jobs "engineer" OR "solutions"'
+    notes: "Berlin. LLMOps / observability."
+    enabled: false
+
+  - name: Lindy
+    careers_url: https://jobs.ashbyhq.com/lindy
+    scan_method: websearch
+    scan_query: '"lindy.ai" "AI" "Forward Deployed" OR "Solutions" site:jobs.ashbyhq.com'
+    notes: "AI agent management platform."
+    enabled: false
+
+  - name: Cognigy
+    careers_url: https://careers.cognigy.com
+    scan_method: websearch
+    scan_query: '"cognigy" careers "AI" OR "Solutions" OR "Engineer"'
+    notes: "Dusseldorf EMEA. Conversational AI enterprise."
+    enabled: false
+
+  - name: Speechmatics
+    careers_url: https://job-boards.greenhouse.io/speechmatics
+    api: https://boards-api.greenhouse.io/v1/boards/speechmatics/jobs
+    notes: "Cambridge UK. Speech recognition platform."
+    enabled: false
+
+  # -- No-Code/Low-Code & Automation --
+
+  - name: n8n
+    careers_url: https://jobs.ashbyhq.com/n8n
+    scan_method: websearch
+    scan_query: 'site:jobs.ashbyhq.com/n8n'
+    notes: "Berlin + remote EU/US. Workflow automation."
+    enabled: false
+
+  - name: Zapier
+    careers_url: https://jobs.ashbyhq.com/zapier
+    scan_method: websearch
+    scan_query: 'site:jobs.ashbyhq.com/zapier'
+    notes: "Remote-first. Automation platform leader."
+    enabled: false
+
+  - name: Make.com (Celonis)
+    careers_url: https://www.make.com/en/careers
+    scan_method: websearch
+    scan_query: 'site:make.com/en/careers OR "make.com" "engineer" OR "solutions" site:jobs.ashbyhq.com'
+    notes: "Celonis parent company. Automation platform."
+    enabled: false
+
+  # -- Ashby-based (Playwright direct) --
+
+  - name: LangChain
+    careers_url: https://jobs.ashbyhq.com/langchain
+    notes: "LangChain/LangSmith framework."
+    enabled: true
+
+  - name: Pinecone
+    careers_url: https://jobs.ashbyhq.com/pinecone
+    notes: "Vector database."
+    enabled: true
+
+  # -- Lever-based (Playwright direct) --
+
+  - name: Mistral AI
+    careers_url: https://jobs.lever.co/mistral
+    notes: "Paris. European AI lab."
+    enabled: true
+
+  - name: Weights & Biases
+    careers_url: https://jobs.lever.co/wandb
+    notes: "MLOps platform."
+    enabled: true
+
+  - name: Palantir
+    careers_url: https://jobs.lever.co/palantir
+    notes: "FDE roles. Mostly US/London."
+    enabled: true
+
+  # -- North America AI-Native PM Targets --
+
+  - name: Scale AI
+    careers_url: https://scale.com/careers
+    notes: "USA. Data and AI platform with strong enterprise PM scope."
+    enabled: true
+
+  - name: Perplexity
+    careers_url: https://www.perplexity.ai/hr/hub/careers
+    scan_method: websearch
+    scan_query: 'site:www.perplexity.ai/hr/hub/careers ("Product Manager" OR "Senior Product Manager" OR "Lead Product Manager" OR "Principal Product Manager")'
+    notes: "USA. AI search product with high-velocity PM surface area."
+    enabled: true
+
+  - name: Runway
+    careers_url: https://runwayml.com/careers
+    notes: "USA. Generative media platform with 0-to-1 PM opportunities."
+    enabled: true
+
+  - name: Writer
+    careers_url: https://writer.com/company/careers
+    notes: "USA. Enterprise genAI platform with applied product bets."
+    enabled: true
+
+  - name: Harvey
+    careers_url: https://www.harvey.ai/careers
+    notes: "USA. Vertical AI leader with workflow-heavy PM scope."
+    enabled: true
+
+  - name: Hebbia
+    careers_url: https://www.hebbia.com/careers
+    notes: "USA. AI knowledge work platform with strong product depth."
+    enabled: true
+
+  - name: Databricks
+    careers_url: https://www.databricks.com/company/careers/open-positions
+    notes: "USA. Data and AI platform with mature PM career paths."
+    enabled: true
+
+  - name: Grammarly
+    careers_url: https://www.grammarly.com/jobs
+    notes: "USA. AI writing product with consumer and enterprise PM roles."
+    enabled: true
+
+  - name: Snorkel AI
+    careers_url: https://snorkel.ai/careers/
+    notes: "USA. Enterprise AI platform with technical product scope."
+    enabled: true
+
+  - name: SandboxAQ
+    careers_url: https://www.sandboxaq.com/careers
+    notes: "USA. Applied AI platform with strategic product problems."
+    enabled: true
+
+  - name: H2O.ai
+    careers_url: https://h2o.ai/company/careers/
+    notes: "USA. Enterprise AI stack with platform PM relevance."
+    enabled: true
+
+  - name: Shield AI
+    careers_url: https://shield.ai/careers
+    notes: "USA. Autonomy platform with complex product execution scope."
+    enabled: true
+
+  - name: Cresta
+    careers_url: https://cresta.com/careers
+    scan_method: websearch
+    scan_query: 'site:cresta.com/careers ("Product Manager" OR "Senior Product Manager" OR "Lead Product Manager" OR "Principal Product Manager")'
+    notes: "USA. Contact center AI platform with clear PM/SPM fit."
+    enabled: true
+
+  - name: Anysphere (Cursor)
+    careers_url: https://cursor.com/en-US/careers
+    scan_method: websearch
+    scan_query: 'site:cursor.com/en-US/careers ("Product Manager" OR "Senior Product Manager" OR "Lead Product Manager" OR "Principal Product Manager")'
+    notes: "USA. Cursor team with fast-moving AI developer product work."
+    enabled: true
+
+  - name: Abnormal AI
+    careers_url: https://careers.abnormal.ai/
+    notes: "USA. AI-native security platform with scaled PM org."
+    enabled: true
+
+  - name: Recursion
+    careers_url: https://www.recursion.com/careers
+    notes: "USA. TechBio platform blending AI, data, and product bets."
+    enabled: true
+
+  - name: Abridge
+    careers_url: https://www.abridge.com/careers
+    notes: "USA. Clinical AI product with strong workflow PM relevance."
+    enabled: true
+
+  - name: Observe.AI
+    careers_url: https://www.observe.ai/careers
+    notes: "USA. Conversation intelligence platform with PM hiring overlap."
+    enabled: true
+
+  - name: AlphaSense
+    careers_url: https://www.alpha-sense.com/careers/
+    notes: "USA. AI market intelligence platform with mature PM scope."
+    enabled: true
+
+  # -- Canada Product & Tech Companies --
+
+  - name: Shopify
+    careers_url: https://www.shopify.com/careers
+    notes: "Canada. Strong PM culture across commerce and platform bets."
+    enabled: true
+
+  - name: 1Password
+    careers_url: https://www.1password.com/jobs
+    notes: "Canada. Security product company with credible PM/SPM hiring."
+    enabled: true
+
+  - name: Wealthsimple
+    careers_url: https://www.wealthsimple.com/en-ca/careers
+    notes: "Canada. Consumer fintech with strong PM product ownership."
+    enabled: true
+
+  - name: Clio
+    careers_url: https://www.clio.com/careers
+    notes: "Canada. Vertical SaaS leader with mature PM growth paths."
+    enabled: true
+
+  - name: Lightspeed
+    careers_url: https://www.lightspeedhq.com/careers/
+    notes: "⚠️ AVOID — repeated layoffs and a weakening business trajectory."
+    enabled: true
+
+  - name: Hootsuite
+    careers_url: https://careers.hootsuite.com/
+    notes: "⚠️ AVOID — repeated layoffs and AI pressure on social SaaS."
+    enabled: true
+
+  - name: PointClickCare
+    careers_url: https://jobs.lever.co/pointclickcare/
+    notes: "Canada. Healthcare SaaS leader with workflow-heavy PM scope."
+    enabled: true
+
+  - name: Jobber
+    careers_url: https://www.getjobber.com/careers/
+    scan_method: websearch
+    scan_query: 'site:www.getjobber.com/careers ("Product Manager" OR "Senior Product Manager" OR "Lead Product Manager" OR "Principal Product Manager")'
+    notes: "Canada. SMB software leader with product and platform PM opportunities."
+    enabled: true
+
+  - name: Ada
+    careers_url: https://job-boards.greenhouse.io/ada
+    scan_method: websearch
+    scan_query: 'site:job-boards.greenhouse.io/ada ("Product Manager" OR "Senior Product Manager" OR "Lead Product Manager" OR "Principal Product Manager")'
+    notes: "Canada. AI customer service platform with credible PM ownership scope."
+    enabled: true
+
+  - name: Cohere
+    careers_url: https://jobs.ashbyhq.com/cohere
+    notes: "Canada. Enterprise LLM platform with technical PM depth."
+    enabled: true
+
+  - name: Coveo
+    careers_url: https://www.coveo.com/en/company/careers
+    notes: "Canada. Search and relevance platform with enterprise PM complexity."
+    enabled: true
+
+  - name: Geotab
+    careers_url: https://careers.geotab.com/
+    notes: "Canada. Connected fleet platform with data-rich PM opportunities."
+    enabled: true
+
+  - name: D2L
+    careers_url: https://www.d2l.com/careers/
+    notes: "Canada. Edtech platform with enterprise product ownership opportunities."
+    enabled: true
+
+  - name: FreshBooks
+    careers_url: https://www.freshbooks.com/careers
+    notes: "Canada. SMB fintech SaaS with strong customer-centered PM scope."
+    enabled: true
+
+  - name: Thinkific
+    careers_url: https://www.thinkific.com/careers/
+    scan_method: websearch
+    scan_query: 'site:www.thinkific.com/careers ("Product Manager" OR "Senior Product Manager" OR "Lead Product Manager" OR "Principal Product Manager")'
+    notes: "⚠️ AVOID — steep decline and AI commoditization in course tools."
+    enabled: true
+
+  - name: TELUS Digital
+    careers_url: https://jobs2.telusdigital.com/
+    notes: "⚠️ AVOID — AI replacing core outsourced services."
+    enabled: true
+
+  - name: OpenText
+    careers_url: https://careers.opentext.com/us/en
+    notes: "⚠️ AVOID — layoffs, revenue decline, and leadership instability."
+    enabled: true
+
+  - name: Klue
+    careers_url: https://klue.com/careers
+    notes: "⚠️ AVOID — AI disruption and weak growth economics."
+    enabled: true
+
+  - name: Dayforce
+    careers_url: https://www.dayforce.com/who-we-are/careers
+    notes: "⚠️ AVOID — layoffs and private-equity ownership risk."
+    enabled: true
+
+  - name: BlackBerry
+    careers_url: https://www.blackberry.com/en/careers
+    notes: "⚠️ AVOID — restructuring and an unclear business trajectory."
+    enabled: true
+
+  - name: TELUS Corporation
+    careers_url: https://www.telus.com/en/careers
+    notes: "⚠️ AVOID — deep workforce cuts and weak earnings."
+    enabled: true
+
+  - name: Tucows
+    careers_url: https://www.tucows.com/careers/overview
+    notes: "⚠️ AVOID — major workforce cuts and business-model stress."
+    enabled: true
+
+  - name: Vidyard
+    careers_url: https://www.vidyard.com/careers/
+    notes: "Canada. Video SaaS platform with B2B and PLG PM depth."
+    enabled: true
+
+  - name: Unbounce
+    careers_url: https://unbounce.com/careers/
+    notes: "Canada. MarTech SaaS leader with experimentation-led PM opportunities."
+    enabled: true
+
+  - name: KOHO
+    careers_url: https://www.koho.ca/careers/
+    notes: "Canada. Consumer fintech with product-led growth and monetization scope."
+    enabled: true
+
+  - name: Neo Financial
+    careers_url: https://jobs.ashbyhq.com/neofinancial
+    notes: "Canada. Consumer fintech scaling cards, banking, and PM hiring."
+    enabled: true
+
+  - name: Waabi
+    careers_url: https://waabi.ai/careers
+    notes: "Canada. AV and AI company with frontier product complexity."
+    enabled: true
+
+  # -- Canadian Banks & Financial Services --
+
+  - name: RBC
+    careers_url: https://jobs.rbc.com/
+    scan_method: websearch
+    scan_query: 'site:jobs.rbc.com ("Product Manager" OR "Senior Product Manager" OR "Digital Product Manager")'
+    notes: "Canada. Largest Canadian bank, large digital product org in Toronto."
+    enabled: true
+
+  - name: TD Bank
+    careers_url: https://jobs.td.com/
+    scan_method: websearch
+    scan_query: 'site:jobs.td.com ("Product Manager" OR "Senior Product Manager" OR "Digital Product Manager")'
+    notes: "Canada. Major digital banking PM teams in Toronto."
+    enabled: true
+
+  - name: BMO
+    careers_url: https://jobs.bmo.com/
+    scan_method: websearch
+    scan_query: 'site:jobs.bmo.com ("Product Manager" OR "Senior Product Manager" OR "Digital Product Manager")'
+    notes: "Canada. Strong digital product org, AI/ML investment."
+    enabled: true
+
+  - name: Scotiabank
+    careers_url: https://www.scotiabank.com/careers/
+    scan_method: websearch
+    scan_query: 'site:www.scotiabank.com/careers ("Product Manager" OR "Senior Product Manager" OR "Digital Product Manager")'
+    notes: "Canada. Global banking, digital transformation teams."
+    enabled: true
+
+  - name: CIBC
+    careers_url: https://cibc.wd3.myworkdayjobs.com/
+    scan_method: websearch
+    scan_query: 'site:cibc.wd3.myworkdayjobs.com ("Product Manager" OR "Senior Product Manager" OR "Digital Product Manager")'
+    notes: "Canada. Digital banking platform modernization."
+    enabled: true
+
+  - name: National Bank
+    careers_url: https://www.nbc.ca/careers.html
+    scan_method: websearch
+    scan_query: 'site:www.nbc.ca/careers ("Product Manager" OR "Senior Product Manager")'
+    notes: "Canada. Growing digital product practice."
+    enabled: true
+
+  - name: Manulife
+    careers_url: https://careers.manulife.com/
+    scan_method: websearch
+    scan_query: 'site:careers.manulife.com ("Product Manager" OR "Senior Product Manager" OR "Digital Product Manager")'
+    notes: "Canada. Insurance/wealth, large tech org in Toronto/Waterloo."
+    enabled: true
+
+  - name: Sun Life
+    careers_url: https://www.sunlife.com/en/careers/
+    scan_method: websearch
+    scan_query: 'site:www.sunlife.com/en/careers ("Product Manager" OR "Senior Product Manager")'
+    notes: "Canada. Insurance/wealth, digital product teams in Toronto."
+    enabled: true
+
+  - name: Canada Life
+    careers_url: https://www.canadalife.com/about-us/careers.html
+    scan_method: websearch
+    scan_query: 'site:www.canadalife.com/about-us/careers ("Product Manager" OR "Senior Product Manager")'
+    notes: "Canada. Insurance, growing digital PM practice."
+    enabled: true
+
+  - name: Fidelity Canada
+    careers_url: https://www.fidelity.ca/en/about-fidelity/careers/
+    scan_method: websearch
+    scan_query: 'site:www.fidelity.ca ("Product Manager" OR "Senior Product Manager")'
+    notes: "Canada. Wealth/investment, digital platform work."
+    enabled: true
+
+  # -- Information Services / Thomson Reuters Adjacent --
+
+  - name: LSEG
+    careers_url: https://www.lseg.com/en/careers
+    scan_method: websearch
+    scan_query: 'site:www.lseg.com/en/careers ("Product Manager" OR "Senior Product Manager")'
+    notes: "Global. Owns Refinitiv, direct TR competitor, Toronto office."
+    enabled: true
+
+  - name: S&P Global
+    careers_url: https://careers.spglobal.com/
+    scan_method: websearch
+    scan_query: 'site:careers.spglobal.com ("Product Manager" OR "Senior Product Manager")'
+    notes: "USA. Market intelligence, data platforms, PM roles."
+    enabled: true
+
+  - name: Wolters Kluwer
+    careers_url: https://careers.wolterskluwer.com/
+    scan_method: websearch
+    scan_query: 'site:careers.wolterskluwer.com ("Product Manager" OR "Senior Product Manager")'
+    notes: "Global. Tax/audit/compliance software, direct TR competitor."
+    enabled: true
+
+  - name: Morningstar
+    careers_url: https://www.morningstar.com/careers
+    scan_method: websearch
+    scan_query: 'site:www.morningstar.com/careers ("Product Manager" OR "Senior Product Manager")'
+    notes: "USA. Investment research platform, Chicago + remote."
+    enabled: true
+
+  - name: Bloomberg
+    careers_url: https://www.bloomberg.com/careers/
+    scan_method: websearch
+    scan_query: 'site:www.bloomberg.com/careers ("Product Manager" OR "Senior Product Manager")'
+    notes: "USA. Financial data terminal, strong PM org."
+    enabled: true
+
+  - name: Moody's
+    careers_url: https://careers.moodys.com/
+    scan_method: websearch
+    scan_query: 'site:careers.moodys.com ("Product Manager" OR "Senior Product Manager")'
+    notes: "USA. Risk/analytics platform, growing PM practice."
+    enabled: true
+
+  - name: Verisk
+    careers_url: https://www.verisk.com/careers/
+    scan_method: websearch
+    scan_query: 'site:www.verisk.com/careers ("Product Manager" OR "Senior Product Manager")'
+    notes: "USA. Data analytics for insurance/financial services."
+    enabled: true
+
+  - name: MSCI
+    careers_url: https://careers.msci.com/
+    scan_method: websearch
+    scan_query: 'site:careers.msci.com ("Product Manager" OR "Senior Product Manager")'
+    notes: "USA. Financial data/analytics, ESG platform."
+    enabled: true
+
+  - name: FactSet
+    careers_url: https://www.factset.com/careers
+    scan_method: websearch
+    scan_query: 'site:www.factset.com/careers ("Product Manager" OR "Senior Product Manager")'
+    notes: "USA. Financial data platform, PM roles."
+    enabled: true
+
+  # -- Canadian Fintech (additional) --
+
+  - name: Nuvei
+    careers_url: https://nuvei.com/careers/
+    scan_method: websearch
+    scan_query: 'site:nuvei.com/careers ("Product Manager" OR "Senior Product Manager")'
+    notes: "Canada. Montreal payments fintech, growing PM org."
+    enabled: true
+
+  - name: Propel Holdings
+    careers_url: https://www.propelholdings.com/careers
+    scan_method: websearch
+    scan_query: 'site:www.propelholdings.com/careers ("Product Manager" OR "Senior Product Manager")'
+    notes: "Canada. Toronto fintech, online lending — direct lending PM fit."
+    enabled: true
+
+  - name: EQ Bank
+    careers_url: https://jobs.lever.co/eqbank
+    notes: "Canada. Toronto digital bank, platform modernization."
+    enabled: true
+
+  - name: Mogo
+    careers_url: https://www.mogo.ca/careers
+    scan_method: websearch
+    scan_query: 'site:www.mogo.ca/careers ("Product Manager" OR "Senior Product Manager")'
+    notes: "Canada. Vancouver fintech, digital financial products."
+    enabled: true
+
+  - name: Interac
+    careers_url: https://www.interac.ca/en/careers/
+    scan_method: websearch
+    scan_query: 'site:www.interac.ca/en/careers ("Product Manager" OR "Senior Product Manager")'
+    notes: "Canada. Toronto, payments infrastructure PM roles."
+    enabled: true
+
+  - name: Payfare
+    careers_url: https://payfare.com/careers/
+    scan_method: websearch
+    scan_query: 'site:payfare.com/careers ("Product Manager" OR "Senior Product Manager")'
+    notes: "Canada. Toronto fintech, earned wage access platform."
+    enabled: true
+
+  - name: Clearco
+    careers_url: https://www.clear.co/careers
+    notes: "⚠️ AVOID — valuation collapse and repeated layoffs."
+    enabled: true
+
+  # -- Enterprise SaaS with Canada/Toronto Presence --
+
+  - name: Autodesk
+    careers_url: https://www.autodesk.com/careers
+    scan_method: websearch
+    scan_query: 'site:www.autodesk.com/careers ("Product Manager" OR "Senior Product Manager")'
+    notes: "USA. Toronto office, platform PM roles."
+    enabled: true
+
+  - name: PTC
+    careers_url: https://www.ptc.com/en/about/careers
+    scan_method: websearch
+    scan_query: 'site:www.ptc.com/en/about/careers ("Product Manager" OR "Senior Product Manager")'
+    notes: "USA. Enterprise SaaS, product lifecycle management."
+    enabled: true
+
+  - name: Procore
+    careers_url: https://www.procore.com/jobs
+    scan_method: websearch
+    scan_query: 'site:www.procore.com/jobs ("Product Manager" OR "Senior Product Manager")'
+    notes: "USA. Construction SaaS, strong PM culture."
+    enabled: true
+
+  - name: Splunk
+    careers_url: https://www.splunk.com/en_us/careers.html
+    scan_method: websearch
+    scan_query: 'site:www.splunk.com/en_us/careers ("Product Manager" OR "Senior Product Manager")'
+    notes: "USA. Observability/security PM depth (Cisco subsidiary)."
+    enabled: true
+
+  - name: Veeva Systems
+    careers_url: https://careers.veeva.com/
+    scan_method: websearch
+    scan_query: 'site:careers.veeva.com ("Product Manager" OR "Senior Product Manager")'
+    notes: "USA. Life sciences SaaS, strong PM org."
+    enabled: true
+
+  - name: Toast
+    careers_url: https://careers.toasttab.com/
+    scan_method: websearch
+    scan_query: 'site:careers.toasttab.com ("Product Manager" OR "Senior Product Manager")'
+    notes: "USA. Restaurant SaaS, strong PM culture."
+    enabled: true
+
+  - name: SAP Canada
+    careers_url: https://www.sap.com/canada/about/careers.html
+    scan_method: websearch
+    scan_query: 'site:www.sap.com/canada/about/careers ("Product Manager" OR "Senior Product Manager")'
+    notes: "Global. Enterprise SaaS, large Canadian presence."
+    enabled: true
+
+  # -- USA Fintech & AI-Adjacent Product Companies --
+
+  - name: Plaid
+    careers_url: https://plaid.com/careers/
+    scan_method: websearch
+    scan_query: 'site:plaid.com/careers ("Product Manager" OR "Senior Product Manager")'
+    notes: "USA. Fintech infrastructure, strong PM org."
+    enabled: true
+
+  - name: Brex
+    careers_url: https://www.brex.com/careers
+    scan_method: websearch
+    scan_query: 'site:www.brex.com/careers ("Product Manager" OR "Senior Product Manager")'
+    notes: "USA. Fintech, AI-enabled expense management."
+    enabled: true
+
+  - name: Ramp
+    careers_url: https://ramp.com/careers
+    scan_method: websearch
+    scan_query: 'site:ramp.com/careers ("Product Manager" OR "Senior Product Manager")'
+    notes: "USA. Fintech, fast-growing PM org."
+    enabled: true
+
+  - name: Rippling
+    careers_url: https://www.rippling.com/careers
+    scan_method: websearch
+    scan_query: 'site:www.rippling.com/careers ("Product Manager" OR "Senior Product Manager")'
+    notes: "USA. HR/finance platform, strong PM hiring."
+    enabled: true
+
+  - name: Gusto
+    careers_url: https://gusto.com/about/careers
+    scan_method: websearch
+    scan_query: 'site:gusto.com/about/careers ("Product Manager" OR "Senior Product Manager")'
+    notes: "USA. HR/payroll SaaS, PM depth."
+    enabled: true
+
+  - name: Carta
+    careers_url: https://carta.com/careers/
+    scan_method: websearch
+    scan_query: 'site:carta.com/careers ("Product Manager" OR "Senior Product Manager")'
+    notes: "USA. Equity management platform, fintech PM."
+    enabled: true
+
+  - name: Affirm
+    careers_url: https://www.affirm.com/careers
+    scan_method: websearch
+    scan_query: 'site:www.affirm.com/careers ("Product Manager" OR "Senior Product Manager")'
+    notes: "USA. Lending/BNPL — direct lending PM overlap with candidate profile."
+    enabled: true
+
+  - name: Upstart
+    careers_url: https://www.upstart.com/careers
+    scan_method: websearch
+    scan_query: 'site:www.upstart.com/careers ("Product Manager" OR "Senior Product Manager")'
+    notes: "USA. AI lending platform — direct domain fit with candidate profile."
+    enabled: true
+
+  - name: Block
+    careers_url: https://block.xyz/careers/jobs
+    notes: "⚠️ AVOID — severe AI-driven workforce contraction."
+    enabled: true
+
+  # -- Global SaaS PM Targets --
+
+  - name: HubSpot
+    careers_url: https://www.hubspot.com/careers/jobs
+    notes: "USA. Product-led SaaS company with strong PM craft culture."
+    enabled: true
+
+  - name: ServiceNow
+    careers_url: https://careers.servicenow.com/
+    scan_method: websearch
+    scan_query: 'site:careers.servicenow.com ("Product Manager" OR "Senior Product Manager" OR "Lead Product Manager" OR "Principal Product Manager")'
+    notes: "USA. Enterprise workflow giant with strong platform PM roles."
+    enabled: true
+
+  - name: Atlassian
+    careers_url: https://www.atlassian.com/company/careers
+    scan_method: websearch
+    scan_query: 'site:www.atlassian.com/company/careers ("Product Manager" OR "Senior Product Manager" OR "Lead Product Manager" OR "Principal Product Manager")'
+    notes: "⚠️ AVOID — AI disruption in core collaboration workflows."
+    enabled: true
+
+  - name: Salesforce
+    careers_url: https://careers.salesforce.com
+    scan_method: websearch
+    scan_query: 'site:careers.salesforce.com ("Product Manager" OR "Senior Product Manager" OR "Lead Product Manager" OR "Principal Product Manager")'
+    notes: "⚠️ AVOID — AI pressure on seat-based CRM and major layoffs."
+    enabled: true
+
+  - name: Workday
+    careers_url: https://www.workday.com/en-us/company/careers/overview.html
+    notes: "⚠️ AVOID — layoffs and AI pressure on HR and finance SaaS."
+    enabled: true
+
+  - name: Chegg
+    careers_url: https://www.chegg.com/about/jobs
+    notes: "⚠️ AVOID — severe AI disruption in the core product."
+    enabled: true
+
+  - name: Twilio
+    careers_url: https://www.twilio.com/en-us/company/jobs
+    scan_method: websearch
+    scan_query: 'site:twilio.com/company/jobs "AI" OR "Voice" "Solutions" OR "Architect"'
+    notes: "⚠️ AVOID — PM org concerns and core-category disruption risk."
+    enabled: true
+
+  - name: Five9
+    careers_url: https://www.five9.com/about/careers
+    notes: "⚠️ AVOID — repeated layoffs and contact center AI pressure."
+    enabled: true
+
+  - name: DocuSign
+    careers_url: https://careers.docusign.com/
+    notes: "⚠️ AVOID — commoditization risk in the core e-signature product."
+    enabled: true
+
+  - name: Zoom
+    careers_url: https://careers.zoom.us/
+    notes: "⚠️ AVOID — commoditization and repeated silent layoffs."
+    enabled: true
+
+  - name: Freshworks
+    careers_url: https://www.freshworks.com/company/careers/
+    notes: "⚠️ AVOID — slowing CX growth and AI disruption risk."
+    enabled: true
+
+  - name: Bumble
+    careers_url: https://team.bumble.com/
+    notes: "⚠️ AVOID — sharp declines in users, revenue, and market cap."
+    enabled: true
+
+  - name: Datadog
+    careers_url: https://careers.datadoghq.com/all-jobs/
+    notes: "USA. Observability platform with technical PM depth across infra and AI."
+    enabled: true
+
+  - name: Snowflake
+    careers_url: https://careers.snowflake.com/
+    notes: "USA. Data cloud company with technical PM depth."
+    enabled: true
+
+  - name: Adobe
+    careers_url: https://careers.adobe.com/
+    notes: "USA. Multi-product platform with senior PM breadth."
+    enabled: true
+
+  - name: Zendesk
+    careers_url: https://www.zendesk.com/company/careers/
+    notes: "USA. CX SaaS platform with workflow and AI-assisted product bets."
+    enabled: true
+
+  - name: Asana
+    careers_url: https://asana.com/jobs/all
+    notes: "USA. Work management SaaS with strong product strategy and PLG exposure."
+    enabled: true
+
+  - name: monday.com
+    careers_url: https://monday.com/careers
+    notes: "Israel. Work OS leader with broad PM openings across platform and growth."
+    enabled: true
+
+  - name: Figma
+    careers_url: https://www.figma.com/careers/
+    notes: "USA. Design collaboration platform with product-led PM opportunities."
+    enabled: true
+
+  - name: Notion
+    careers_url: https://www.notion.com/careers
+    notes: "USA. Workspace SaaS with 0-to-1 and collaboration PM scope."
+    enabled: true
+
+  - name: Canva
+    careers_url: https://www.canva.com/careers/
+    scan_method: websearch
+    scan_query: 'site:www.canva.com/careers ("Product Manager" OR "Senior Product Manager" OR "Lead Product Manager" OR "Principal Product Manager")'
+    notes: "Australia. Design SaaS giant with global PM breadth and growth surface area."
+    enabled: true
+
+  - name: Miro
+    careers_url: https://miro.com/careers/open-positions/
+    notes: "Global. Collaboration platform with enterprise and AI PM scope."
+    enabled: true
+
+  - name: GitLab
+    careers_url: https://job-boards.greenhouse.io/gitlab
+    notes: "USA. Remote-first DevSecOps platform with strong PM opportunities."
+    enabled: true
+
+  - name: Airtable
+    careers_url: https://job-boards.greenhouse.io/airtable
+    api: https://boards-api.greenhouse.io/v1/boards/airtable/jobs
+    notes: "USA. Product-led platform with technical PM scope across AI and workflows."
+    enabled: true
+
+  - name: Intercom
+    careers_url: https://job-boards.greenhouse.io/intercom
+    api: https://boards-api.greenhouse.io/v1/boards/intercom/jobs
+    notes: "Ireland. Customer messaging platform with mature PM roles across AI and support."
+    enabled: true
+
+  - name: Cloudflare
+    careers_url: https://www.cloudflare.com/careers/jobs/
+    notes: "USA. Developer and infrastructure platform with technical PM scope."
+    enabled: true
+
+  - name: Okta
+    careers_url: https://www.okta.com/company/careers/
+    notes: "USA. Identity platform with platform and security PM breadth."
+    enabled: true
+
+  - name: Confluent
+    careers_url: https://careers.confluent.io/
+    scan_method: websearch
+    scan_query: 'site:careers.confluent.io ("Product Manager" OR "Senior Product Manager" OR "Lead Product Manager" OR "Principal Product Manager")'
+    notes: "USA. Data streaming platform with technical PM depth."
+    enabled: true
+
+  # -- North America Traditional Tech PM Targets --
+
+  - name: Google
+    careers_url: https://www.google.com/about/careers/applications/jobs/results/
+    scan_method: websearch
+    scan_query: 'site:www.google.com/about/careers/applications/jobs/results ("Product Manager" OR "Senior Product Manager" OR "Lead Product Manager" OR "Principal Product Manager")'
+    notes: "USA. Benchmark PM org with broad product leadership paths."
+    enabled: true
+
+  - name: Microsoft
+    careers_url: https://careers.microsoft.com/v2/global/en/search.html
+    scan_method: websearch
+    scan_query: 'site:careers.microsoft.com ("Product Manager" OR "Senior Product Manager" OR "Lead Product Manager" OR "Principal Product Manager")'
+    notes: "USA. Large PM ladder across cloud, AI, and platform teams."
+    enabled: true
+
+  - name: Amazon
+    careers_url: https://www.amazon.jobs/en/
+    scan_method: websearch
+    scan_query: 'site:www.amazon.jobs/en/ ("Product Manager" OR "Senior Product Manager" OR "Lead Product Manager" OR "Principal Product Manager")'
+    notes: "USA. Product org with deep platform and growth ownership."
+    enabled: true
+
+  - name: Meta
+    careers_url: https://www.metacareers.com/
+    scan_method: websearch
+    scan_query: 'site:www.metacareers.com ("Product Manager" OR "Senior Product Manager" OR "Lead Product Manager" OR "Principal Product Manager")'
+    notes: "USA. High-leverage PM roles across consumer and AI products."
+    enabled: true
+
+  - name: Apple
+    careers_url: https://jobs.apple.com/en-us/search
+    scan_method: websearch
+    scan_query: 'site:jobs.apple.com/en-us/search ("Product Manager" OR "Senior Product Manager" OR "Lead Product Manager" OR "Principal Product Manager")'
+    notes: "USA. Hardware-software ecosystem with senior PM opportunities."
+    enabled: true
+
+  - name: Intuit
+    careers_url: https://jobs.intuit.com/
+    notes: "⚠️ AVOID — AI replacement pressure across tax and finance workflows."
+    enabled: true
+
+  - name: Cisco
+    careers_url: https://jobs.cisco.com/jobs/SearchJobs/
+    notes: "USA. Large enterprise platform with steady PM leadership roles."
+    enabled: true
+
+  - name: Uber
+    careers_url: https://www.uber.com/us/en/careers/list/
+    scan_method: websearch
+    scan_query: 'site:www.uber.com/us/en/careers/list ("Product Manager" OR "Senior Product Manager" OR "Lead Product Manager" OR "Principal Product Manager")'
+    notes: "USA. Marketplace PM org with complex operational products."
+    enabled: true
+
+  - name: NVIDIA
+    careers_url: https://www.nvidia.com/en-us/about-nvidia/careers/
+    notes: "USA. AI infrastructure leader with platform PM relevance."
+    enabled: true
+
+  - name: Stripe
+    careers_url: https://stripe.com/jobs/search?query=product%20manager
+    notes: "USA. Payments platform with elite PM brand and execution rigor."
+    enabled: true
+
+  - name: LinkedIn
+    careers_url: https://careers.linkedin.com/
+    scan_method: websearch
+    scan_query: 'site:careers.linkedin.com ("Product Manager" OR "Senior Product Manager" OR "Lead Product Manager" OR "Principal Product Manager")'
+    notes: "USA. Consumer and enterprise product org with strong PM brand."
+    enabled: true
+
+  # -- IT Outsourcing & Consultancies --
+
+  - name: Accenture
+    careers_url: https://www.accenture.com/us-en/careers/jobsearch
+    scan_method: websearch
+    scan_query: 'site:www.accenture.com/us-en/careers/jobsearch ("Product Manager" OR "Senior Product Manager" OR "Technical Product Manager" OR "Digital Product Manager")'
+    notes: "Global IT consulting leader with enterprise transformation and product delivery roles."
+    enabled: true
+
+  - name: Capgemini
+    careers_url: https://www.capgemini.com/careers/
+    scan_method: websearch
+    scan_query: 'site:www.capgemini.com/careers ("Product Manager" OR "Senior Product Manager" OR "Technical Product Manager" OR "Digital Product Manager")'
+    notes: "Global consultancy with digital product and enterprise transformation opportunities."
+    enabled: true
+
+  - name: Cognizant
+    careers_url: https://careers.cognizant.com/global/en
+    scan_method: websearch
+    scan_query: 'site:careers.cognizant.com/global/en ("Product Manager" OR "Senior Product Manager" OR "Technical Product Manager" OR "Digital Product Manager")'
+    notes: "Global IT services firm with strong enterprise modernization and delivery work."
+    enabled: true
+
+  - name: Infosys
+    careers_url: https://career.infosys.com/
+    scan_method: websearch
+    scan_query: 'site:career.infosys.com ("Product Manager" OR "Senior Product Manager" OR "Technical Product Manager" OR "Digital Product Manager")'
+    notes: "Global IT services and consulting firm with large-scale client delivery roles."
+    enabled: true
+
+  - name: HCLTech
+    careers_url: https://careers.hcltech.com/
+    scan_method: websearch
+    scan_query: 'site:careers.hcltech.com ("Product Manager" OR "Senior Product Manager" OR "Technical Product Manager" OR "Digital Product Manager")'
+    notes: "Global engineering and IT services company with enterprise product transformation work."
+    enabled: true
+
+  - name: Tata Consultancy Services
+    careers_url: https://www.tcs.com/careers
+    scan_method: websearch
+    scan_query: 'site:www.tcs.com/careers ("Product Manager" OR "Senior Product Manager" OR "Technical Product Manager" OR "Digital Product Manager")'
+    notes: "Global IT services giant with product, delivery, and transformation roles."
+    enabled: true
+
+  - name: Wipro
+    careers_url: https://careers.wipro.com/careers-home/
+    scan_method: websearch
+    scan_query: 'site:careers.wipro.com ("Product Manager" OR "Senior Product Manager" OR "Technical Product Manager" OR "Digital Product Manager")'
+    notes: "Global IT services and consulting firm with enterprise delivery depth."
+    enabled: true
+
+  - name: EPAM
+    careers_url: https://www.epam.com/careers
+    scan_method: websearch
+    scan_query: 'site:www.epam.com/careers ("Product Manager" OR "Senior Product Manager" OR "Technical Product Manager" OR "Digital Product Manager")'
+    notes: "Global digital engineering firm with strong product and client-facing transformation work."
+    enabled: true
+
+  - name: Globant
+    careers_url: https://career.globant.com/
+    scan_method: websearch
+    scan_query: 'site:career.globant.com ("Product Manager" OR "Senior Product Manager" OR "Technical Product Manager" OR "Digital Product Manager")'
+    notes: "Global digital consultancy with product strategy and modernization programs."
+    enabled: true
+
+  - name: CGI
+    careers_url: https://www.cgi.com/en/careers
+    scan_method: websearch
+    scan_query: 'site:www.cgi.com/en/careers ("Product Manager" OR "Senior Product Manager" OR "Technical Product Manager" OR "Digital Product Manager")'
+    notes: "Canada-founded IT services firm with broad enterprise consulting opportunities."
+    enabled: true
+
+  - name: NTT DATA
+    careers_url: https://us.nttdata.com/en/careers
+    scan_method: websearch
+    scan_query: 'site:us.nttdata.com/en/careers ("Product Manager" OR "Senior Product Manager" OR "Technical Product Manager" OR "Digital Product Manager")'
+    notes: "Global IT services leader with enterprise modernization and managed services depth."
+    enabled: true
+
+  - name: Tech Mahindra
+    careers_url: https://careers.techmahindra.com/
+    scan_method: websearch
+    scan_query: 'site:careers.techmahindra.com ("Product Manager" OR "Senior Product Manager" OR "Technical Product Manager" OR "Digital Product Manager")'
+    notes: "Global IT services and telecom-heavy consultancy with large delivery programs."
+    enabled: true
+
+  - name: LTIMindtree
+    careers_url: https://careers.ltimindtree.com/
+    scan_method: websearch
+    scan_query: 'site:careers.ltimindtree.com ("Product Manager" OR "Senior Product Manager" OR "Technical Product Manager" OR "Digital Product Manager")'
+    notes: "Global consulting and engineering firm with enterprise product transformation work."
+    enabled: true
+
+  - name: Kyndryl
+    careers_url: https://www.kyndryl.com/us/en/careers
+    scan_method: websearch
+    scan_query: 'site:www.kyndryl.com/us/en/careers ("Product Manager" OR "Senior Product Manager" OR "Technical Product Manager" OR "Digital Product Manager")'
+    notes: "Infrastructure services leader with large-scale enterprise platform and modernization work."
+    enabled: true
+
+  - name: Endava
+    careers_url: https://www.endava.com/careers
+    scan_method: websearch
+    scan_query: 'site:www.endava.com/careers ("Product Manager" OR "Senior Product Manager" OR "Technical Product Manager" OR "Digital Product Manager")'
+    notes: "Digital engineering consultancy with strong client-facing product and platform programs."
+    enabled: true
+
+  - name: Concentrix
+    careers_url: https://jobs.concentrix.com/
+    scan_method: websearch
+    scan_query: 'site:jobs.concentrix.com ("Product Manager" OR "Senior Product Manager" OR "Technical Product Manager" OR "Digital Product Manager")'
+    notes: "Global CX and digital services provider with outsourcing and transformation scale."
+    enabled: true
+
+  - name: Deloitte
+    careers_url: https://www.deloitte.com/us/en/careers/careers.html
+    scan_method: websearch
+    scan_query: 'site:www.deloitte.com/us/en/careers ("Product Manager" OR "Senior Product Manager" OR "Technical Product Manager" OR "Digital Product Manager")'
+    notes: "Global consulting leader with product strategy, transformation, and enterprise delivery roles."
+    enabled: true
+
+  - name: EY
+    careers_url: https://www.ey.com/en_us/careers
+    scan_method: websearch
+    scan_query: 'site:www.ey.com/en_us/careers ("Product Manager" OR "Senior Product Manager" OR "Technical Product Manager" OR "Digital Product Manager")'
+    notes: "Global consultancy with digital product, transformation, and enterprise modernization work."
+    enabled: true
+
+  - name: Publicis Sapient
+    careers_url: https://careers.publicissapient.com/
+    scan_method: websearch
+    scan_query: 'site:careers.publicissapient.com ("Product Manager" OR "Senior Product Manager" OR "Technical Product Manager" OR "Digital Product Manager")'
+    notes: "Digital business transformation consultancy with strong product and experience strategy teams."
+    enabled: true
+
+  - name: Genpact
+    careers_url: https://www.genpact.com/careers
+    scan_method: websearch
+    scan_query: 'site:www.genpact.com/careers ("Product Manager" OR "Senior Product Manager" OR "Technical Product Manager" OR "Digital Product Manager")'
+    notes: "Global business and technology services firm with enterprise process and platform programs."
+    enabled: true
+
+  # -- European tech (EMEA-friendly) --
+
+  - name: Factorial
+    careers_url: https://job-boards.greenhouse.io/factorial
+    scan_method: websearch
+    scan_query: 'site:jobs.greenhouse.io/factorial'
+    notes: "Barcelona. HR SaaS unicorn."
+    enabled: false
+
+  - name: Attio
+    careers_url: https://jobs.ashbyhq.com/attio
+    scan_method: websearch
+    scan_query: 'site:attio.com/careers OR site:jobs.ashbyhq.com/attio'
+    notes: "Remote EU. AI-native CRM. Series B $52M."
+    enabled: false
+
+  - name: Tinybird
+    careers_url: https://jobs.ashbyhq.com/tinybird
+    scan_method: websearch
+    scan_query: 'site:tinybird.co/careers OR site:jobs.ashbyhq.com/tinybird'
+    notes: "Remote. Real-time data platform."
+    enabled: false
+
+  - name: Clarity AI
+    careers_url: https://jobs.lever.co/clarity-ai
+    scan_method: websearch
+    scan_query: 'site:clarity.ai/careers OR site:jobs.lever.co/clarity-ai'
+    notes: "Madrid/Remote. Sustainability analytics with AI."
+    enabled: false
+
+  - name: Travelperk
+    careers_url: https://jobs.ashbyhq.com/travelperk
+    scan_method: websearch
+    scan_query: 'site:jobs.ashbyhq.com/travelperk'
+    notes: "Barcelona. Business travel unicorn."
+    enabled: false
+
+  # -- DACH & European AI ecosystem --
+  # All entries below have been verified against the Greenhouse / Ashby /
+  # Lever / Workable APIs or live job boards. Greenhouse boards expose a
+  # JSON API at https://boards-api.greenhouse.io/v1/boards/{slug}/jobs which
+  # the scanner can hit directly via the api: field.
+
+  # -- DACH AI labs & frontier model providers --
+
+  - name: Aleph Alpha
+    careers_url: https://jobs.ashbyhq.com/AlephAlpha
+    scan_method: websearch
+    scan_query: 'site:jobs.ashbyhq.com/AlephAlpha'
+    notes: "Heidelberg DE. Sovereign European LLM provider, enterprise & government focus."
+    enabled: false
+
+  - name: DeepL
+    careers_url: https://jobs.ashbyhq.com/DeepL
+    scan_method: websearch
+    scan_query: 'site:jobs.ashbyhq.com/DeepL'
+    notes: "Cologne DE. Translation & language AI. 60+ open roles, EU/DACH heavy."
+    enabled: false
+
+  - name: Black Forest Labs
+    careers_url: https://job-boards.greenhouse.io/blackforestlabs
+    api: https://boards-api.greenhouse.io/v1/boards/blackforestlabs/jobs
+    notes: "Freiburg DE / SF. FLUX image models, ex-Stable Diffusion team."
+    enabled: false
+
+  - name: Helsing
+    careers_url: https://job-boards.greenhouse.io/helsing
+    api: https://boards-api.greenhouse.io/v1/boards/helsing/jobs
+    notes: "Munich / Berlin / London / Paris. Defence AI unicorn. 100+ roles, ML & FDE."
+    enabled: false
+
+  # -- DACH enterprise & SaaS (AI-heavy) --
+
+  - name: Celonis
+    careers_url: https://job-boards.greenhouse.io/celonis
+    api: https://boards-api.greenhouse.io/v1/boards/celonis/jobs
+    notes: "Munich / NYC. Process intelligence, Applied AI Engineer roles, Field CTOs."
+    enabled: false
+
+  - name: Contentful
+    careers_url: https://job-boards.greenhouse.io/contentful
+    api: https://boards-api.greenhouse.io/v1/boards/contentful/jobs
+    notes: "Berlin / Denver. Headless CMS, AI content workflows."
+    enabled: false
+
+  - name: GetYourGuide
+    careers_url: https://job-boards.greenhouse.io/getyourguide
+    api: https://boards-api.greenhouse.io/v1/boards/getyourguide/jobs
+    notes: "Berlin. Travel marketplace, ML & data platform roles."
+    enabled: false
+
+  - name: HelloFresh
+    careers_url: https://job-boards.greenhouse.io/hellofresh
+    api: https://boards-api.greenhouse.io/v1/boards/hellofresh/jobs
+    notes: "Berlin. Meal kit unicorn, large data/ML org."
+    enabled: false
+
+  # -- DACH fintech --
+
+  - name: N26
+    careers_url: https://job-boards.greenhouse.io/n26
+    api: https://boards-api.greenhouse.io/v1/boards/n26/jobs
+    notes: "Berlin / Barcelona. Mobile bank, ~50 roles, ML & risk."
+    enabled: false
+
+  - name: Trade Republic
+    careers_url: https://job-boards.greenhouse.io/traderepublicbank
+    api: https://boards-api.greenhouse.io/v1/boards/traderepublicbank/jobs
+    notes: "Berlin / London / Paris. Neobroker, ~50 roles, platform & data."
+    enabled: false
+
+  - name: SumUp
+    careers_url: https://job-boards.greenhouse.io/sumup
+    api: https://boards-api.greenhouse.io/v1/boards/sumup/jobs
+    notes: "Berlin / London. Payments fintech, EU + LATAM hiring."
+    enabled: false
+
+  - name: Qonto
+    careers_url: https://jobs.lever.co/qonto
+    notes: "Paris / Berlin / Barcelona / Milan. SMB neobank, MLOps for AI Product roles."
+    enabled: false
+
+  # -- DACH logistics / mobility --
+
+  - name: Forto
+    careers_url: https://jobs.lever.co/forto
+    notes: "Berlin DE. Digital freight forwarder, product & data roles, German + English."
+    enabled: false
+
+  # -- Switzerland / Austria AI --
+
+  - name: Lakera
+    careers_url: https://jobs.ashbyhq.com/lakera.ai
+    scan_method: websearch
+    scan_query: 'site:jobs.ashbyhq.com/lakera.ai'
+    notes: "Zurich CH / SF. AI security & guardrails. Has Forward Deployed Engineer roles."
+    enabled: false
+
+  - name: Scandit
+    careers_url: https://job-boards.greenhouse.io/scandit
+    api: https://boards-api.greenhouse.io/v1/boards/scandit/jobs
+    notes: "Zurich CH. Computer vision / smart data capture, ML roles."
+    enabled: false
+
+  - name: Cradle
+    careers_url: https://jobs.ashbyhq.com/cradlebio
+    scan_method: websearch
+    scan_query: 'site:jobs.ashbyhq.com/cradlebio'
+    notes: "Zurich CH / Amsterdam. AI-guided protein design, ML researcher roles."
+    enabled: false
+
+  # -- France AI ecosystem --
+
+  - name: Hugging Face
+    careers_url: https://apply.workable.com/huggingface/
+    scan_method: websearch
+    scan_query: 'site:apply.workable.com/huggingface'
+    notes: "Paris / NYC / Remote. ML hub & open-source models."
+    enabled: false
+
+  - name: Photoroom
+    careers_url: https://jobs.ashbyhq.com/photoroom
+    scan_method: websearch
+    scan_query: 'site:jobs.ashbyhq.com/photoroom'
+    notes: "Paris FR. AI photo editor, Head of CV / Head of ML roles."
+    enabled: false
+
+  - name: Pigment
+    careers_url: https://jobs.lever.co/pigment
+    notes: "Paris FR / NYC / London. AI-powered FP&A planning platform."
+    enabled: false
+
+  # -- UK & Ireland AI (EU-friendly hiring) --
+
+  - name: Wayve
+    careers_url: https://job-boards.greenhouse.io/wayve
+    api: https://boards-api.greenhouse.io/v1/boards/wayve/jobs
+    notes: "London UK. Embodied AI for self-driving, ML & robotics roles."
+    enabled: false
+
+  - name: Isomorphic Labs
+    careers_url: https://job-boards.greenhouse.io/isomorphiclabs
+    api: https://boards-api.greenhouse.io/v1/boards/isomorphiclabs/jobs
+    notes: "London / Lausanne / Cambridge MA. DeepMind spin-out for drug discovery AI."
+    enabled: false
+
+  - name: PhysicsX
+    careers_url: https://job-boards.greenhouse.io/physicsx
+    api: https://boards-api.greenhouse.io/v1/boards/physicsx/jobs
+    notes: "London UK. Physics-informed ML for engineering, ~40 roles."
+    enabled: false
+
+  - name: Stability AI
+    careers_url: https://job-boards.greenhouse.io/stabilityai
+    api: https://boards-api.greenhouse.io/v1/boards/stabilityai/jobs
+    notes: "London / SF. Generative AI image/video research lab."
+    enabled: false
+
+  - name: Synthesia
+    careers_url: https://jobs.ashbyhq.com/synthesia
+    scan_method: websearch
+    scan_query: 'site:jobs.ashbyhq.com/synthesia OR site:job-boards.greenhouse.io/synthesia'
+    notes: "London UK. AI video generation for enterprise, $4B valuation."
+    enabled: false
+
+  - name: Faculty
+    careers_url: https://jobs.ashbyhq.com/faculty
+    scan_method: websearch
+    scan_query: 'site:jobs.ashbyhq.com/faculty'
+    notes: "London UK. Applied AI consultancy. 80+ roles, AI Safety / MLE / Delivery."
+    enabled: false
+
+  - name: Causaly
+    careers_url: https://jobs.ashbyhq.com/causaly
+    scan_method: websearch
+    scan_query: 'site:jobs.ashbyhq.com/causaly'
+    notes: "London / Athens. Biomedical knowledge graph + AI."
+    enabled: false
+
+  # -- Nordics AI --
+
+  - name: Lovable
+    careers_url: https://jobs.ashbyhq.com/lovable
+    scan_method: websearch
+    scan_query: 'site:jobs.ashbyhq.com/lovable'
+    notes: "Stockholm SE. AI app builder (text-to-app), 80+ open roles."
+    enabled: false
+
+  - name: Legora
+    careers_url: https://jobs.ashbyhq.com/legora
+    scan_method: websearch
+    scan_query: 'site:jobs.ashbyhq.com/legora'
+    notes: "Stockholm SE / NYC / London. AI-native legal workspace."
+    enabled: false
+
+  - name: Spotify
+    careers_url: https://jobs.lever.co/spotify
+    notes: "Stockholm SE / NYC / London. Audio platform, large ML/personalization org."
+    enabled: false
+
+  - name: Vinted
+    careers_url: https://jobs.lever.co/vinted
+    notes: "Vilnius LT / Berlin. C2C marketplace unicorn, data science & ML roles."
+    enabled: false
+
+  # -- Iberia AI --
+
+  - name: Amplemarket
+    careers_url: https://job-boards.greenhouse.io/amplemarket
+    api: https://boards-api.greenhouse.io/v1/boards/amplemarket/jobs
+    notes: "Lisbon PT / Remote. AI-native sales platform."
+    enabled: false
