@@ -1,6 +1,6 @@
 # Bulk Re-Prepare for Pathfinder-Only Jobs
 
-**Trigger:** the candidate says "rerun lin03prepare for all materials_ready which has ATS as pathfinder only" or similar.
+**Trigger:** the user says "rerun lin03prepare for all materials_ready which has ATS as pathfinder only" or similar.
 
 ## Pre-flight
 

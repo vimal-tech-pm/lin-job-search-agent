@@ -2,7 +2,7 @@
 # no_agent cron payload: refresh tracker, print Telegram digest (stdout is the message).
 # Empty stdout = no message; non-zero exit = error alert. Both probe-confirmed Hermes semantics.
 set -euo pipefail
-cd "$(dirname "$(dirname "$(readlink -f "$0")")")/lin"
+cd ~/.hermes/profiles/lin/lin
 OUT=$(node scripts/lin-tracker.mjs 2>&1) || { echo "📊 Lin track FAILED: ${OUT:0:300}"; exit 1; }
 DIGEST=$(printf '%s\n' "$OUT" | awk '/Lin funnel digest:/,/^$/')
 echo "📊 Lin track — $(date +%F)"
@@ -35,3 +35,8 @@ for days, slug in sorted(rows, reverse=True)[:5]:
 EOF
 echo "staged awaiting build: $(node scripts/lin-worklist.mjs --status staged | grep -c . || true)"
 echo "built awaiting finalize: $(node scripts/lin-worklist.mjs --status built | grep -c . || true)"
+# Lin Today dashboard refresh (read-only adapter + renderer). Failures alert via
+# stderr/exit but must not kill the digest above — hence the guarded subshell.
+if ! (node scripts/lin-today-data.mjs >/dev/null && node ~/.hermes/dashboard-ui/render.mjs >/dev/null); then
+  echo "⚠️ lin-today dashboard refresh failed (digest above is unaffected)"
+fi

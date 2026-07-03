@@ -29,6 +29,13 @@ import { fileURLToPath } from "node:url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// Canonical identity helpers live in lib/canonical.mjs so discovery, promotion,
+// dashboard render, and the dedup backfill all agree on "the same job". Imported
+// for local use AND re-exported so existing callers/tests that import them from
+// here keep working unchanged.
+import { slugify, normalizeTitle, canonicalKey, canonicalizeUrl } from "./lib/canonical.mjs";
+export { slugify, normalizeTitle, canonicalKey, canonicalizeUrl };
+
 // Source vocabulary in data is lowercase. camelCase verbs (scanLinkedIn) are
 // aliases only and must never be written into data files.
 export const SOURCES = new Set(["portal", "linkedin", "indeed", "gmail", "manual"]);
@@ -50,59 +57,34 @@ export const SCAN_HISTORY_HEADER =
 const LEGACY_HEADER = "date\tcompany\ttitle\turl";
 
 // ---------- pure helpers (exported for tests) ----------
+// slugify / normalizeTitle / canonicalKey / canonicalizeUrl now live in
+// lib/canonical.mjs (imported and re-exported above).
 
-export function slugify(s) {
-  return String(s ?? "")
-    .toLowerCase()
-    .replace(/&/g, " and ")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
+// Placeholders for URL-only manual adds (dashboard "Add by URL"). The scorer
+// overwrites company/role from the JD; these only need to read sensibly in the
+// Pending view and never collide on a canonical key (see processCandidates).
+export const UNKNOWN_COMPANY = "(manual add)";
+export const UNKNOWN_ROLE = "(unscored — added by URL)";
 
-// Strip parenthetical location lists, trailing separators, collapse whitespace.
-export function normalizeTitle(title) {
-  return String(title ?? "")
-    .replace(/\([^)]*\)/g, " ")        // "(San Francisco, CA | NYC)" → " "
-    .replace(/\s+/g, " ")
-    .replace(/[-–—,|]+\s*$/g, "")
-    .trim()
-    .toLowerCase();
-}
-
-export function canonicalKey(company, role) {
-  return `${slugify(company)}::${slugify(normalizeTitle(role))}`;
-}
-
-// Source-specific canonical URL. The board is detected from the URL itself so
-// old rows (whose source we don't know) canonicalize identically to new ones.
-// Indeed → jk= job key; LinkedIn → /jobs/view/<id>; Greenhouse/Lever/Ashby and
-// everything else → host+path with query/hash dropped (their id lives in path).
-export function canonicalizeUrl(rawUrl) {
-  const s = String(rawUrl ?? "").trim();
-  if (!s) return "";
+// Best-effort company name from an ATS URL whose org slug lives in path segment
+// 0 (Greenhouse / Lever / Ashby). Returns "" for boards that don't expose it
+// (Indeed/LinkedIn/Workday) so the caller falls back to UNKNOWN_COMPANY.
+export function manualCompanyHint(rawUrl) {
   let u;
-  try {
-    u = new URL(s);
-  } catch {
-    // Not a parseable URL — fall back to a trimmed lowercase string.
-    return s.replace(/[#?].*$/, "").replace(/\/+$/, "").toLowerCase();
-  }
+  try { u = new URL(String(rawUrl ?? "")); } catch { return ""; }
   const host = u.hostname.toLowerCase().replace(/^www\./, "");
+  const seg = u.pathname.split("/").filter(Boolean);
+  if (/(?:^|\.)greenhouse\.io$/.test(host) || /(?:^|\.)lever\.co$/.test(host) || /(?:^|\.)ashbyhq\.com$/.test(host)) {
+    return seg[0] || "";
+  }
+  return "";
+}
 
-  if (host.includes("indeed.")) {
-    const jk = u.searchParams.get("jk") || /\/viewjob\/([A-Za-z0-9]+)/.exec(u.pathname)?.[1];
-    if (jk) return `indeed.com/viewjob?jk=${jk}`;
-  }
-  if (host.includes("linkedin.")) {
-    const id =
-      /\/jobs\/view\/(\d+)/.exec(u.pathname)?.[1] ||
-      u.searchParams.get("currentJobId");
-    if (id) return `linkedin.com/jobs/view/${id}`;
-  }
-  // Greenhouse: collapse boards.greenhouse.io / job-boards.greenhouse.io.
-  let normHost = host.replace(/^job-boards\.greenhouse\.io$/, "boards.greenhouse.io");
-  const cleanPath = u.pathname.replace(/\/+$/, "");
-  return `${normHost}${cleanPath}`.toLowerCase();
+// A field is "provided" when it carries real content — blank and the "?"
+// placeholder that older callers sent both count as absent.
+function fieldProvided(v) {
+  const s = String(v ?? "").trim();
+  return !!s && s !== "?";
 }
 
 /**
@@ -189,8 +171,9 @@ export function parsePendingRow(line) {
   const tail = afterCompany.slice(urlIdx + url.length);
   const source = /src=([^\s|]+)/.exec(tail)?.[1] || "portal";
   const duplicate_of = /dup_of=([^\s|]+)/.exec(tail)?.[1] || null;
+  const posted_date = /posted=(\d{4}-\d{2}-\d{2})/.exec(tail)?.[1] || null;
   return {
-    date, company, role, url, source, duplicate_of,
+    date, company, role, url, source, duplicate_of, posted_date,
     canonical_url: canonicalizeUrl(url),
     canonical_key: canonicalKey(company, role),
   };
@@ -266,9 +249,10 @@ const PIPE = (v) => String(v ?? "")
 
 // ---------- core append (testable via temp vault) ----------
 
-export function buildDedupSets(pipelineRows, historyRows) {
+export function buildDedupSets(pipelineRows, historyRows, folderRows = []) {
   const urlSet = new Set();
   const keyToFirst = new Map();
+  const activeKeys = new Set(); // canonical keys already tracked by an ACTIVE job folder
   const add = (canonUrl, key, originalUrl, source = "portal") => {
     if (canonUrl) urlSet.add(canonUrl);
     if (key && !keyToFirst.has(key)) keyToFirst.set(key, { url: originalUrl || canonUrl, source });
@@ -280,7 +264,14 @@ export function buildDedupSets(pipelineRows, historyRows) {
     if (r.status === "skipped_title" || r.status === "skipped_dup") continue;
     add(r.canonical_url, r.canonical_key, r.url, r.source || "portal");
   }
-  return { urlSet, keyToFirst };
+  // Company folders are the authoritative tracker: a job we're already pursuing
+  // must not re-enter as a pending row. Closed/archived folders are deliberately
+  // left OUT of activeKeys so a genuine repost of a dead role can still resurface.
+  for (const r of folderRows) {
+    add(r.canonical_url, r.canonical_key, r.url, r.source || "portal");
+    if (r.active && r.canonical_key) activeKeys.add(r.canonical_key);
+  }
+  return { urlSet, keyToFirst, activeKeys };
 }
 
 /**
@@ -288,18 +279,32 @@ export function buildDedupSets(pipelineRows, historyRows) {
  * the new pipeline lines, the new scan-history lines, and per-status counts.
  * Pure with respect to the inputs — the CLI does the file I/O around it.
  */
-export function processCandidates({ candidates, source, filter, pipelineRows, historyRows, cap, today }) {
-  const { urlSet, keyToFirst } = buildDedupSets(pipelineRows, historyRows);
+export function processCandidates({ candidates, source, filter, pipelineRows, historyRows, folderRows = [], cap, today }) {
+  const { urlSet, keyToFirst, activeKeys } = buildDedupSets(pipelineRows, historyRows, folderRows);
   const pipelineLines = [];
   const historyLines = [];
   const stats = { added: 0, skipped_dup: 0, skipped_dup_crosssource: 0, skipped_title: 0, dropped_cap: 0 };
 
+  const manual = source === "manual";
+
   for (const cand of candidates) {
-    const company = PIPE(cand.company);
-    const role = PIPE(cand.role);
     const url = String(cand.url ?? "").replace(/[\t\n\r]/g, "").trim();
-    if (!url || !company || !role) continue; // malformed candidate, ignore
+    if (!url) continue; // a URL is the one hard requirement
     if (!/^https?:\/\//i.test(url)) continue; // reject non-web URLs before pipeline write
+
+    // Manual adds may be URL-only (dashboard "Add by URL"); automated scans must
+    // still carry company+role or they're treated as malformed and ignored.
+    const hasCompany = fieldProvided(cand.company);
+    const hasRole = fieldProvided(cand.role);
+    if (!manual && (!hasCompany || !hasRole)) continue;
+
+    // Known company/role drive the canonical key + cross-source dedup. When a
+    // manual add omits them we fill readable placeholders the scorer overwrites,
+    // and dedupe on URL identity ALONE — the placeholder key is meaningless and
+    // would otherwise collapse every distinct URL-only add into one.
+    const titleKnown = hasCompany && hasRole;
+    const company = hasCompany ? PIPE(cand.company) : (manualCompanyHint(url) || UNKNOWN_COMPANY);
+    const role = hasRole ? PIPE(cand.role) : UNKNOWN_ROLE;
     const date = (cand.seen_at && /^\d{4}-\d{2}-\d{2}/.test(cand.seen_at))
       ? cand.seen_at.slice(0, 10) : today;
     const canonUrl = canonicalizeUrl(url);
@@ -314,29 +319,42 @@ export function processCandidates({ candidates, source, filter, pipelineRows, hi
       // Keep dedup sets live within this run too, but only for candidates that
       // actually produced a pending pipeline row. Title-filtered rows and exact
       // duplicates are audit history only; they must not suppress a later valid
-      // row with the same URL/key.
+      // row with the same URL/key. Placeholder keys are never registered.
       if (status !== "skipped_title" && status !== "skipped_dup") {
         urlSet.add(canonUrl);
-        if (!keyToFirst.has(key)) keyToFirst.set(key, { url: dupOf || url, source });
+        if (titleKnown && !keyToFirst.has(key)) keyToFirst.set(key, { url: dupOf || url, source });
       }
     };
 
-    // 1) title filter
-    const tf = passesTitleFilter(role, filter);
-    if (!tf.pass) { stats.skipped_title++; histRow("skipped_title"); continue; }
+    // 1) title filter — automated scans only. A manual add is an explicit user
+    //    decision, so it is never culled (and may have no title to filter on).
+    if (!manual) {
+      const tf = passesTitleFilter(role, filter);
+      if (!tf.pass) { stats.skipped_title++; histRow("skipped_title"); continue; }
+    }
 
     // 2) exact canonical-URL dup → genuinely redundant, do not append
     if (urlSet.has(canonUrl)) { stats.skipped_dup++; histRow("skipped_dup"); continue; }
 
-    // 3) canonical-key dup at a different URL → cross-source duplicate. Keep
-    //    BOTH rows; append the new one with a dup_of sibling pointer.
-    const siblingInfo = keyToFirst.get(key) || null;
-    if (siblingInfo && siblingInfo.source === source) {
-      stats.skipped_dup++;
-      histRow("skipped_dup");
-      continue;
+    // 2.5) already tracked by an ACTIVE company folder → we're already pursuing
+    //      this exact role, so a pending row (even from a new board) is pure
+    //      noise. Suppress it. Closed/archived folders are excluded upstream, so
+    //      a genuine repost of a dead role still gets through.
+    if (titleKnown && activeKeys.has(key)) { stats.skipped_dup++; histRow("skipped_dup"); continue; }
+
+    // 3) canonical-key dup at a different URL → cross-source duplicate. Only
+    //    meaningful when company+role are known; keep BOTH rows and append the
+    //    new one with a dup_of sibling pointer.
+    let sibling = null;
+    if (titleKnown) {
+      const siblingInfo = keyToFirst.get(key) || null;
+      if (siblingInfo && siblingInfo.source === source) {
+        stats.skipped_dup++;
+        histRow("skipped_dup");
+        continue;
+      }
+      sibling = siblingInfo?.url || null;
     }
-    const sibling = siblingInfo?.url || null;
     const isCross = !!sibling;
 
     // 4) cap enforcement — both clean-new and cross-source appends count.
@@ -345,8 +363,14 @@ export function processCandidates({ candidates, source, filter, pipelineRows, hi
       continue; // not written to history so it can be re-seen next run
     }
 
+    // Real listing date when the scanner captured one (ISO; distinct from `date`,
+    // which is when WE saw it). Surfaced as the dashboard's posted-recency signal.
+    const postedRaw = String(cand.posted_date ?? "");
+    const posted = /^\d{4}-\d{2}-\d{2}/.test(postedRaw) ? postedRaw.slice(0, 10) : null;
+
     let row = `- [ ] ${date} | ${company} | ${role} | ${url} | src=${source}`;
     if (isCross) row += ` dup_of=${sibling}`;
+    if (posted) row += ` posted=${posted}`;
     pipelineLines.push(row);
 
     if (isCross) { stats.skipped_dup_crosssource++; histRow("skipped_dup_crosssource", sibling); }
@@ -357,6 +381,39 @@ export function processCandidates({ candidates, source, filter, pipelineRows, hi
 }
 
 // ---------- CLI ----------
+
+// Read the authoritative job folders (companies/<co>/jobs/<slug>/job.yml) into the
+// minimal shape buildDedupSets needs. Tiny per-field regex parse — job.yml is flat
+// `key: value` YAML and we only need five scalars; no yaml dep, no full parse.
+function readJobFolders(companiesDir) {
+  const out = [];
+  let cos;
+  try { cos = fs.readdirSync(companiesDir, { withFileTypes: true }); } catch { return out; }
+  for (const co of cos) {
+    if (!co.isDirectory()) continue;
+    const jobsDir = path.join(companiesDir, co.name, "jobs");
+    let jobs;
+    try { jobs = fs.readdirSync(jobsDir, { withFileTypes: true }); } catch { continue; }
+    for (const j of jobs) {
+      if (!j.isDirectory()) continue;
+      let text;
+      try { text = fs.readFileSync(path.join(jobsDir, j.name, "job.yml"), "utf8"); } catch { continue; }
+      const field = (k) => new RegExp(`^${k}:\\s*['"]?(.*?)['"]?\\s*(?:#.*)?$`, "m").exec(text)?.[1]?.trim() || "";
+      const url = field("source_url");
+      const company = field("company_slug") || co.name;
+      const title = field("title") || j.name;
+      const status = field("status").toLowerCase();
+      out.push({
+        url,
+        canonical_url: url ? canonicalizeUrl(url) : "",
+        canonical_key: field("source_canonical_key") || canonicalKey(company, title),
+        source: field("source_channel") || "portal",
+        active: !!status && status !== "closed",
+      });
+    }
+  }
+  return out;
+}
 
 function readConfigCap(vault, source) {
   const p = path.join(vault, "career-profile", "pipeline-config.json");
@@ -470,9 +527,10 @@ function main() {
     const historyText = fs.existsSync(HISTORY) ? fs.readFileSync(HISTORY, "utf8") : "";
     const pipelineRows = parsePipelineRows(pipelineText);
     const historyRows = parseScanHistory(historyText);
+    const folderRows = readJobFolders(path.join(vault, "companies"));
 
     const result = processCandidates({
-      candidates, source, filter, pipelineRows, historyRows, cap, today: todayIso(),
+      candidates, source, filter, pipelineRows, historyRows, folderRows, cap, today: todayIso(),
     });
     const { pipelineLines, historyLines } = result;
 
@@ -507,7 +565,22 @@ function main() {
   const dupes = stats.skipped_dup + cross;
   let digest = `${source}: +${stats.added} new, ${dupes} dupes (${cross} cross-source), ${stats.skipped_title} filtered`;
   if (stats.dropped_cap) digest += `, ${stats.dropped_cap} dropped (cap ${cap})`;
-  console.log(digest);
+
+  // --json: machine-readable stats on stdout (lin-serve's hAddJobs parses this);
+  // human digest to stderr so cron callers that scrape stdout stay unchanged.
+  if (argv.includes("--json")) {
+    console.error(digest);
+    console.log(JSON.stringify({
+      ok: true, source,
+      added: stats.added,
+      duplicates: dupes,
+      cross_source: cross,
+      filtered: stats.skipped_title,
+      dropped_cap: stats.dropped_cap,
+    }));
+  } else {
+    console.log(digest);
+  }
   process.exit(0);
 }
 

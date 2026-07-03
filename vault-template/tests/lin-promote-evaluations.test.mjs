@@ -31,11 +31,15 @@ function makeRole(overrides = {}) {
 
 function makeVault(queueRoles, config = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lin-promote-test-'));
-  fs.mkdirSync(path.join(dir, 'scripts'), { recursive: true });
+  fs.mkdirSync(path.join(dir, 'scripts', 'lib'), { recursive: true });
   fs.mkdirSync(path.join(dir, 'data'), { recursive: true });
   fs.mkdirSync(path.join(dir, 'reports'), { recursive: true });
   fs.mkdirSync(path.join(dir, 'career-profile'), { recursive: true });
   fs.copyFileSync(SOURCE_SCRIPT, path.join(dir, 'scripts', 'lin-promote-evaluations.mjs'));
+  // the script imports the shared geo-gate decision; copy it so the temp vault resolves it
+  fs.copyFileSync(path.resolve('scripts/lib/geo-gate.mjs'), path.join(dir, 'scripts', 'lib', 'geo-gate.mjs'));
+  // it also imports the shared canonical-identity helpers (cross-source dedup)
+  fs.copyFileSync(path.resolve('scripts/lib/canonical.mjs'), path.join(dir, 'scripts', 'lib', 'canonical.mjs'));
   fs.writeFileSync(
     path.join(dir, 'data', 'evaluation-queue.json'),
     JSON.stringify({ schema_version: 1, generated_at: '2026-06-02T00:00:00.000Z', roles: queueRoles }, null, 2) + '\n',
@@ -223,7 +227,45 @@ test('promotion writes status: staged and manual source maps to intake-manual', 
   assert.match(yml, /^discovered_via: intake-manual$/m);
 });
 
-test('--list-candidates --auto returns top-N floor + requested rows only', () => {
+test('a queue row posted_date threads into the staged job.yml', () => {
+  const vault = makeVault([
+    makeRole({ id: '411', co_slug: 'freshco', job_slug: 'fresh-role', url: 'https://example.com/jobs/411', posted_date: '2026-06-12' }),
+    makeRole({ id: '412', co_slug: 'datelessco', job_slug: 'no-date', url: 'https://example.com/jobs/412' }),
+  ]);
+  const liveness = path.join(vault, 'liveness.json');
+  fs.writeFileSync(liveness, JSON.stringify({
+    checked_by: 'test',
+    results: [
+      { id: '411', checked_url: 'https://example.com/jobs/411', status: 'active', apply_path_found: true, evidence: 'test' },
+      { id: '412', checked_url: 'https://example.com/jobs/412', status: 'active', apply_path_found: true, evidence: 'test' },
+    ],
+  }));
+  const res = runScript(vault, [`--liveness-file=${liveness}`, '--threshold=3.95', '--limit=5']);
+  assert.equal(res.status, 0, res.stderr || res.stdout);
+  assert.match(fs.readFileSync(path.join(vault, 'companies', 'freshco', 'jobs', 'fresh-role', 'job.yml'), 'utf8'), /^posted_date: 2026-06-12$/m);
+  assert.match(fs.readFileSync(path.join(vault, 'companies', 'datelessco', 'jobs', 'no-date', 'job.yml'), 'utf8'), /^posted_date: null$/m);
+});
+
+test('liveness cover_required threads into staged job.yml.cover_required', () => {
+  const vault = makeVault([
+    makeRole({ id: '801', co_slug: 'covco', job_slug: 'needs-cover', url: 'https://example.com/jobs/801' }),
+    makeRole({ id: '802', co_slug: 'nocov', job_slug: 'no-cover', url: 'https://example.com/jobs/802' }),
+  ]);
+  const liveness = path.join(vault, 'liveness.json');
+  fs.writeFileSync(liveness, JSON.stringify({
+    checked_by: 'test',
+    results: [
+      { id: '801', checked_url: 'https://example.com/jobs/801', status: 'active', apply_path_found: true, cover_required: true, evidence: 'cover-letter field on Greenhouse form' },
+      { id: '802', checked_url: 'https://example.com/jobs/802', status: 'active', apply_path_found: true, evidence: 'no cover field seen' },
+    ],
+  }));
+  const res = runScript(vault, [`--liveness-file=${liveness}`, '--threshold=3.95', '--limit=5']);
+  assert.equal(res.status, 0, res.stderr || res.stdout);
+  assert.match(fs.readFileSync(path.join(vault, 'companies', 'covco', 'jobs', 'needs-cover', 'job.yml'), 'utf8'), /^cover_required: true$/m);
+  assert.match(fs.readFileSync(path.join(vault, 'companies', 'nocov', 'jobs', 'no-cover', 'job.yml'), 'utf8'), /^cover_required: false$/m);
+});
+
+test('--list-candidates --auto returns top-N floor rows plus every build_requested row (any score)', () => {
   const vault = makeVault([
     makeRole({ id: '501', score: 4.6, job_slug: 'r501', url: 'https://example.com/jobs/501' }),
     makeRole({ id: '502', score: 4.4, job_slug: 'r502', url: 'https://example.com/jobs/502' }),
@@ -238,8 +280,60 @@ test('--list-candidates --auto returns top-N floor + requested rows only', () =>
   assert.equal(res.status, 0, res.stderr || res.stdout);
   const payload = JSON.parse(res.stdout);
   assert.equal(payload.selection_mode, 'auto');
-  assert.deepEqual(payload.candidates.map((c) => c.id), ['501', '502', '503', '505']);
+  // top-3 ≥ floor (501,502,503) + EVERY build_requested row regardless of score:
+  // 505 (4.0) and 506 (3.8, below promote_threshold) are both explicit superuser requests.
+  assert.deepEqual(payload.candidates.map((c) => c.id), ['501', '502', '503', '505', '506']);
   const by = Object.fromEntries(payload.candidates.map((c) => [c.id, c.selected_by]));
   assert.equal(by['501'], 'auto-top-n');
   assert.equal(by['505'], 'build_requested');
+  assert.equal(by['506'], 'build_requested'); // below floor + below promote_threshold, but explicitly requested
+});
+
+test('--auto skips geo-blocked rows before top-N slicing and reports skip count', () => {
+  const vault = makeVault([
+    makeRole({ id: '601', score: 4.9, job_slug: 'blocked-high', url: 'https://example.com/jobs/601', geo_gate: { blocks_stage: true, reason: 'remote-only' } }),
+    makeRole({ id: '602', score: 4.4, job_slug: 'eligible-one', url: 'https://example.com/jobs/602' }),
+    makeRole({ id: '603', score: 4.3, job_slug: 'eligible-two', url: 'https://example.com/jobs/603' }),
+    makeRole({ id: '604', score: 4.2, job_slug: 'eligible-three', url: 'https://example.com/jobs/604' }),
+  ], { auto_build_floor: 4.2, auto_build_top_n: 2 });
+
+  const res = runScript(vault, ['--list-candidates', '--json', '--auto']);
+  assert.equal(res.status, 0, res.stderr || res.stdout);
+  const payload = JSON.parse(res.stdout);
+  assert.equal(payload.geo_blocked_auto_skipped, 1);
+  assert.deepEqual(payload.candidates.map((c) => c.id), ['602', '603']);
+});
+
+test('--auto includes build_requested geo-blocked rows as explicit overrides', () => {
+  const vault = makeVault([
+    makeRole({ id: '701', score: 4.6, job_slug: 'eligible-auto', url: 'https://example.com/jobs/701' }),
+    makeRole({ id: '702', score: 4.0, job_slug: 'blocked-requested', url: 'https://example.com/jobs/702', build_requested: true, geo_gate: { blocks_stage: true, reason: 'onsite-only' } }),
+  ], { auto_build_floor: 4.2, auto_build_top_n: 1 });
+
+  const res = runScript(vault, ['--list-candidates', '--json', '--auto']);
+  assert.equal(res.status, 0, res.stderr || res.stdout);
+  const payload = JSON.parse(res.stdout);
+  assert.deepEqual(payload.candidates.map((c) => c.id), ['701', '702']);
+  const requested = payload.candidates.find((c) => c.id === '702');
+  assert.equal(requested.selected_by, 'build_requested');
+  assert.equal(requested.geo_gate_bypassed, true);
+  assert.equal(requested.geo_gate_reason, 'onsite-only');
+});
+
+test('--id bypasses geo gate and proceeds to liveness/stage', () => {
+  const vault = makeVault([
+    makeRole({ id: '801', score: 4.6, co_slug: 'blockedco', job_slug: 'blocked-manual', url: 'https://example.com/jobs/801', geo_gate: { blocks_stage: true, reason: 'visa' } }),
+  ]);
+  const liveness = path.join(vault, 'liveness.json');
+  fs.writeFileSync(liveness, JSON.stringify({
+    checked_by: 'test',
+    results: [{ id: '801', checked_url: 'https://example.com/jobs/801', status: 'active', apply_path_found: true, checked_at: '2026-06-10T00:00:00Z', evidence: 'test' }],
+  }));
+
+  const res = runScript(vault, [`--liveness-file=${liveness}`, '--id=801']);
+  assert.equal(res.status, 0, res.stderr || res.stdout);
+  assert.match(res.stdout, /\[override\].*building despite geo gate \(visa\)/);
+  assert.match(res.stdout, /\[stage\]/);
+  const yml = fs.readFileSync(path.join(vault, 'companies', 'blockedco', 'jobs', 'blocked-manual', 'job.yml'), 'utf8');
+  assert.match(yml, /^status: staged$/m);
 });

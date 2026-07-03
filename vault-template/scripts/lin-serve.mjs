@@ -39,7 +39,7 @@ const HERMES = process.env.LIN_HERMES_BIN || "hermes"; // test hook
 const SLUG_RE = /^[A-Za-z0-9._-]+$/;
 const REF_RE = /^(#?\d+|[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+)$/;
 const ID_RE = /^#?\d+$/;
-const STAGES = new Set(["score", "stage", "build", "finalize"]);
+const STAGES = new Set(["score", "stage", "build", "finalize", "build-forge"]);
 
 function cors(res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -113,6 +113,10 @@ async function hWontApply(body, res) {
   return sendJson(res, 200, { ok: results.every((x) => x.ok), results });
 }
 
+// NOTE: geo-blocked rows are intentionally allowed through here. Flagging a role
+// for build (build_requested) is the deliberate override the pipeline honors; the
+// dashboard's confirm dialog is a mis-click guard, NOT a cost/security policy
+// boundary. Don't add a server-side geo check without changing that design intent.
 async function hRequestBuild(body, res) {
   const ids = Array.isArray(body.ids) ? body.ids.slice(0, 50) : null;
   if (!ids?.length) return sendJson(res, 400, { ok: false, error: "ids[] required" });
@@ -129,6 +133,22 @@ async function hRequestBuild(body, res) {
 }
 
 const lastTrigger = new Map(); // stage → ts; platform drops mid-run triggers, this just stops spamming
+// Manual outcome / furthest-stage override from the dashboard's outcome editor.
+// Sticky (source: manual) — the email scanner won't overwrite it.
+async function hSetOutcome(body, res) {
+  const { co, slug, outcome, stage } = body;
+  if (!co || !slug || !SLUG_RE.test(co) || !SLUG_RE.test(slug)) {
+    return sendJson(res, 400, { ok: false, error: "co and slug required (alnum . _ - only)" });
+  }
+  if (!outcome && !stage) return sendJson(res, 400, { ok: false, error: "outcome and/or stage required" });
+  const args = [script("lin-set-outcome.mjs"), "--ref", `${co}/${slug}`, "--json"];
+  if (outcome) args.push("--outcome", String(outcome));
+  if (stage) args.push("--stage", String(stage));
+  const r = await run(process.execPath, args);
+  const parsed = lastJson(r.out) || { ok: false, error: (r.err || r.out || `exit ${r.code}`).slice(0, 300) };
+  return sendJson(res, parsed.ok ? 200 : 409, parsed);
+}
+
 async function hRunStage(body, res) {
   const stage = String(body.stage || "");
   if (!STAGES.has(stage)) return sendJson(res, 400, { ok: false, error: `stage must be one of ${[...STAGES].join("|")}` });
@@ -136,7 +156,9 @@ async function hRunStage(body, res) {
   if (now - (lastTrigger.get(stage) || 0) < 120000) {
     return sendJson(res, 429, { ok: false, error: `lin-${stage} already triggered <2min ago` });
   }
-  const r = await run(HERMES, ["-p", "lin", "cron", "run", `lin-${stage}`]);
+  // "build" stage routes to lin-build-forge when the fastpath is active
+  const cronId = stage === "build" ? "lin-build-forge" : `lin-${stage}`;
+  const r = await run(HERMES, ["-p", "lin", "cron", "run", cronId]);
   if (r.code !== 0) return sendJson(res, 502, { ok: false, error: (r.err || r.out || `exit ${r.code}`).slice(0, 300) });
   lastTrigger.set(stage, now);
   return sendJson(res, 200, { ok: true, stage, note: "fires on the next scheduler tick (≤60s)" });
@@ -145,20 +167,24 @@ async function hRunStage(body, res) {
 async function hAddJobs(body, res) {
   const urls = (Array.isArray(body.urls) ? body.urls : []).map(String).filter((u) => /^https?:\/\/\S+$/.test(u)).slice(0, 25);
   if (!urls.length) return sendJson(res, 400, { ok: false, error: "urls[] of http(s) links required" });
-  const candidates = urls.map((url) => ({ company: "?", role: "?", url }));
+  // URL-only candidates — the append helper fills readable placeholders and the
+  // scorer derives the real company/role from the JD. (Sending fake "?" values
+  // here used to get every add rejected by the title filter.)
+  const candidates = urls.map((url) => ({ url }));
   const tmp = path.join(os.tmpdir(), `lin-addjobs-${Date.now()}.json`);
   fs.writeFileSync(tmp, JSON.stringify(candidates));
-  const r = await run(process.execPath, [script("lin-discovery-append.mjs"), "--source", "manual", "--file", tmp]);
+  const r = await run(process.execPath, [script("lin-discovery-append.mjs"), "--source", "manual", "--file", tmp, "--json"]);
   fs.unlinkSync(tmp);
   if (r.code !== 0) return sendJson(res, 502, { ok: false, error: (r.err || r.out || `exit ${r.code}`).slice(0, 400) });
-  const added = Number(/added[:\s]+(\d+)/i.exec(r.out)?.[1] ?? NaN);
-  const duplicates = Number(/(?:dup(?:licate)?s?)[:\s]+(\d+)/i.exec(r.out)?.[1] ?? NaN);
+  // --json prints a machine-readable stats line on stdout; the digest is on stderr.
+  const stats = lastJson(r.out) || {};
   await run(process.execPath, [script("lin-tracker.mjs")]);
   return sendJson(res, 200, {
     ok: true,
-    added: Number.isFinite(added) ? added : null,
-    duplicates: Number.isFinite(duplicates) ? duplicates : null,
-    out: r.out.slice(-400),
+    added: Number.isFinite(stats.added) ? stats.added : null,
+    duplicates: Number.isFinite(stats.duplicates) ? stats.duplicates : null,
+    filtered: Number.isFinite(stats.filtered) ? stats.filtered : null,
+    out: (r.err || r.out).slice(-400),
   });
 }
 
@@ -211,7 +237,7 @@ async function hSettingsChannels(body, res) {
   return sendJson(res, 200, { ok: true, backup, channel: ch, enabled: cfg[ch].enabled });
 }
 
-const AUTORUN_JOBS = ["lin-scan","lin-status","lin-score","lin-stage","lin-build","lin-finalize","lin-deep-prep","lin-track"];
+const AUTORUN_JOBS = ["lin-scan","lin-status","lin-score","lin-stage","lin-build-forge","lin-deep-prep","lin-track"];
 
 function autorunState() {
   try {
@@ -284,7 +310,7 @@ async function hCover(body, res) {
   let model = "gpt-5.5", provider = "openai-codex";
   try {
     const jobs = JSON.parse(fs.readFileSync(path.join(VAULT, "..", "cron", "jobs.json"), "utf8")).jobs;
-    const b = jobs.find((j) => j.id === "lin-build");
+    const b = jobs.find((j) => j.id === "lin-build-forge") || jobs.find((j) => j.id === "lin-build");
     if (b?.model) { model = b.model; provider = b.provider || provider; }
   } catch {}
   const logPath = path.join(os.tmpdir(), `lin-cover-${co}-${slug}.log`);
@@ -298,7 +324,7 @@ async function hCover(body, res) {
   return sendJson(res, 200, { ok: true, ref, model, note: "generating (~1-3 min) — reload the dashboard after; log: " + logPath });
 }
 
-// ---------- run-pipeline: detached stage → build → finalize chain ----------
+// ---------- run-pipeline: detached stage → build-forge chain ----------
 // The one-click answer to "I flagged a role, run it NOW": lin-run executes each
 // stage synchronously on its pinned cron model, chained in a detached shell.
 let pipelineStartedAt = 0;
@@ -309,12 +335,12 @@ async function hRunPipeline(body, res) {
   const bin = process.env.LIN_PIPELINE_BIN || path.join(VAULT, "scripts", "lin-run");
   const logPath = path.join(os.tmpdir(), `lin-pipeline-${Date.now()}.log`);
   const fd = fs.openSync(logPath, "a");
-  const child = spawn("bash", ["-c", `"${bin}" stage auto && "${bin}" build batch && "${bin}" finalize batch`],
+  const child = spawn("bash", ["-c", `"${bin}" stage auto && "${bin}" build-forge batch`],
     { cwd: VAULT, detached: true, stdio: ["ignore", fd, fd] });
   child.unref();
   fs.closeSync(fd);
   pipelineStartedAt = Date.now();
-  return sendJson(res, 200, { ok: true, note: "stage → build → finalize chain started (~5-15 min); reload the dashboard after. log: " + logPath });
+  return sendJson(res, 200, { ok: true, note: "stage → build-forge chain started (~5-15 min); reload the dashboard after. log: " + logPath });
 }
 
 async function hPromote(body, res) {
@@ -337,7 +363,71 @@ const POST_ROUTES = {
   "/profile-file": hProfileFilePost,
   "/cover": hCover,
   "/run-pipeline": hRunPipeline,
+  "/set-outcome": hSetOutcome,
 };
+
+// ---------- read-only static artifact serving ----------
+// The dashboard links to ../reports/…, ../companies/…/, ../jds/…, eval PDFs, etc.
+// Those resolve under file:// but 404 over HTTP without this. We serve ONLY from a
+// whitelist of vault subdirs, and only after resolving the REAL path (symlinks
+// included) and confirming it stays inside the vault — so `..`/symlink escapes
+// can't read arbitrary files. Read-only: GET streams the file, nothing mutates.
+// career-profile is intentionally NOT here — those files are config, not linked
+// artifacts, and the settings page serves the few it needs via /profile-file.
+const STATIC_ROOTS = new Set(["reports", "companies", "jds", "deep-prep", "evals", "output"]);
+const CONTENT_TYPES = {
+  ".md": "text/markdown; charset=utf-8", ".pdf": "application/pdf",
+  ".html": "text/html; charset=utf-8", ".htm": "text/html; charset=utf-8",
+  ".txt": "text/plain; charset=utf-8", ".json": "application/json; charset=utf-8",
+  ".yml": "text/plain; charset=utf-8", ".yaml": "text/plain; charset=utf-8",
+  ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".svg": "image/svg+xml",
+};
+function streamFile(abs, res) {
+  const ct = CONTENT_TYPES[path.extname(abs).toLowerCase()] || "application/octet-stream";
+  cors(res);
+  res.writeHead(200, { "Content-Type": ct, "X-Content-Type-Options": "nosniff" });
+  fs.createReadStream(abs).pipe(res);
+}
+
+// Returns true when it owns the request (served a file/listing or sent an error),
+// false when the path isn't a whitelisted artifact root (caller falls through to 404).
+function serveStatic(pathname, res) {
+  let rel;
+  try { rel = decodeURIComponent(pathname.replace(/^\/+/, "")); }
+  catch { sendJson(res, 400, { ok: false, error: "bad path" }); return true; }
+  const segments = rel.split("/");
+  const top = segments[0];
+  if (!STATIC_ROOTS.has(top)) return false;
+  // Defense in depth: after decoding, reject any traversal/current segment so a
+  // %2e%2e%2f sequence can't climb out of the whitelisted root before we resolve.
+  if (segments.some((s) => s === ".." || s === ".")) {
+    sendJson(res, 403, { ok: false, error: "forbidden" }); return true;
+  }
+  // Confine to the REAL whitelisted root, not just the vault. Escaping `reports/`
+  // into a sibling (career-profile/, data/) must be denied even though it stays
+  // inside the vault — and resolving via realpath also blocks a symlink inside the
+  // root that points elsewhere.
+  let rootReal, real;
+  try { rootReal = fs.realpathSync(path.join(VAULT, top)); }
+  catch { sendJson(res, 404, { ok: false, error: "not found" }); return true; }
+  try { real = fs.realpathSync(path.resolve(VAULT, rel)); }
+  catch { sendJson(res, 404, { ok: false, error: "not found" }); return true; }
+  if (real !== rootReal && !real.startsWith(rootReal + path.sep)) {
+    sendJson(res, 403, { ok: false, error: "forbidden" }); return true;
+  }
+  const st = fs.statSync(real);
+  if (st.isDirectory()) {
+    // Serve a known index if one exists; do NOT enumerate directory contents.
+    // The server binds 0.0.0.0 by design (phone/LAN/Tailscale), so a listing would
+    // leak filenames across the LAN — an index keeps folder links working without it.
+    const idx = ["index.html", "PACKAGE.md", "README.md"].map((f) => path.join(real, f)).find((p) => fs.existsSync(p));
+    if (idx) { streamFile(idx, res); return true; }
+    sendJson(res, 404, { ok: false, error: "no index for this directory" });
+    return true;
+  }
+  streamFile(real, res);
+  return true;
+}
 
 const server = http.createServer(async (req, res) => {
   if (req.method === "OPTIONS") { cors(res); res.writeHead(204); return res.end(); }
@@ -370,6 +460,10 @@ const server = http.createServer(async (req, res) => {
     const body = await readBody(req, res);
     if (body === null) return;
     try { return await POST_ROUTES[url.pathname](body, res); }
+    catch (e) { return sendJson(res, 500, { ok: false, error: e.message }); }
+  }
+  if (req.method === "GET" || req.method === "HEAD") {
+    try { if (serveStatic(url.pathname, res)) return; }
     catch (e) { return sendJson(res, 500, { ok: false, error: e.message }); }
   }
   sendJson(res, 404, { ok: false, error: "not found" });

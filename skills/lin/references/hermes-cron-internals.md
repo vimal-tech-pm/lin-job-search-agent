@@ -88,7 +88,7 @@ This produces `agent._fallback_chain = []` (agent_init.py:936).
 **Verification (2026-06-10):** All 17 new tests pass (447 total across cron + fallback suites).
 Live verification: `lin03prepare` 429 now degrades to `deepseek-v4-pro (opencode-go)` with log lines:
 ```
-Job 'lin03prepare': fallback_providers inherited from root config $LIN_REAL_HOME/.hermes/config.yaml
+Job 'lin03prepare': fallback_providers inherited from root config ~/.hermes/config.yaml
 Fallback activated: gpt-5.5 → deepseek-v4-pro (opencode-go)
 ```
 
@@ -226,3 +226,117 @@ verified: `[paused]` → `[active]` after `hermes cron run`.
 run` always re-enables the job. For a state-preserving one-shot, stop the
 gateway, manually set `next_run_at` to now in jobs.json, then restart — or
 accept the re-enable and re-pause afterward.
+
+## 7. Bulk Cron Provider Migration (2026-06-20)
+
+When a provider hits a weekly usage limit (e.g. OpenCode Go 429), all cron
+jobs pinned to that provider fail simultaneously. The fix is to switch them
+to a direct API provider (e.g. `deepseek` provider with `deepseek-v4-flash`
+model, using `DEEPSEEK_API_KEY` in the profile `.env`).
+
+**Bulk migration via cronjob tool:**
+
+```
+for each job with provider=opencode-go, model=deepseek-v4-flash:
+  cronjob(action='update', job_id='<id>', model={'model':'deepseek-v4-flash','provider':'deepseek'})
+```
+
+The `cronjob(action='update')` call with a `model` dict updates both the
+`model` and `provider` fields on the job. This is safe while the gateway
+runs (atomic load/mutate/save).
+
+**After migration, trigger failed jobs one-by-one:**
+
+```
+cronjob(action='run', job_id='<id>')
+```
+
+Each triggered job executes on the next 60-second scheduler tick with the
+new provider. Delivery goes to the job's `deliver` target (typically Telegram).
+
+**Verification:** After all updates, run `cronjob(action='list')` and confirm
+zero remaining jobs with the old provider/model combination.
+
+**Pitfall:** `lin-status` is a `no_agent` script-only job. Updating its
+model/provider fields is cosmetic (the script doesn't call the LLM), but
+harmless and keeps the inventory consistent.
+
+**Pitfall:** `no_agent` script jobs have a 120s default timeout
+(`_DEFAULT_SCRIPT_TIMEOUT = 120` in scheduler.py, overridable via
+`HERMES_CRON_SCRIPT_TIMEOUT` env var or `cron.script_timeout_seconds` config).
+If a script hangs past this, the cron job fails with "Script timed out after
+120s: <path>". This is NOT an LLM issue — the script itself is stuck. Common
+cause: the script spawns a subprocess that blocks on an external dependency
+(e.g. `secret-tool` waiting for GNOME Keyring unlock in a headless cron env).
+`timeout 8s` wrapping the subprocess sends SIGTERM, but if the subprocess is\nin an uninterruptible DBUS syscall, SIGTERM is not delivered until the syscall\nreturns — which may never happen. **Fix applied 2026-06-20:** removed the\nhimalaya fallback path from `lin-gmail-status.mjs` entirely; GAPI (Google\nWorkspace OAuth) is now the sole Gmail backend. The GAPI token was symlinked\nfrom root to the lin profile (`ln -s ~/.hermes/google_token.json\n~/.hermes/profiles/lin/google_token.json`) so `setup.py --check` finds it.\nAdditionally, `cron.script_timeout_seconds` is now 900 because the status script scales with applied-job count. Calibration: 118 applied jobs → ~251s (300s was sufficient); 158 applied jobs → ~6m48s, so 300s timed out and 900s was verified on 2026-06-24.
+
+**Pitfall:** Jobs with different models (e.g. `lin-build` -> `ollama/glm-5.2`,
+`lin-deep-prep` -> `opencode-go/mimo-v2.5`) should NOT be bulk-migrated. Only
+migrate jobs that were on the failed provider with the failed model.
+
+**Pitfall: provider stale-stream timeout + fallback both matter for DeepSeek cron jobs (2026-06-24)**
+Lin's agent-driven cron jobs can show `RuntimeError: [Errno 32] Broken pipe` when Hermes kills a provider stream after no chunks arrive for the stale threshold. The diagnostic line is usually:
+
+```bash
+Stream stale for 180s (threshold 180s) — no chunks received ... Killing connection
+```
+
+This affected `provider=deepseek model=deepseek-v4-flash` first; after fallback, it can also affect `provider=opencode-go model=deepseek-v4-flash` unless that provider has the same stale-timeout headroom.
+
+**Production Lin settings verified 2026-06-24:**
+
+```yaml
+providers:
+  deepseek:
+    stale_timeout_seconds: 600
+  opencode-go:
+    stale_timeout_seconds: 600
+fallback_providers:
+  - model: deepseek-v4-flash
+    provider: opencode-go
+```
+
+`fallback_providers: []` disables fallback entirely and should not be used on unattended production cron profiles unless deliberately testing a provider in isolation. But fallback alone is not enough for this failure class: Hermes' eager fallback primarily handles rate-limit/billing failures; ReadError/broken-pipe paths may only move to fallback after exhausting primary retries. The real prevention is increasing provider stale timeouts so long cron prompts are not killed before first token.
+
+**Diagnosis recipe:**
+```bash
+journalctl --user -u hermes-lin-gateway --since "<date>" | grep -E "Stream stale|Broken pipe|provider="
+```
+Check both the threshold and the provider/model. If threshold is 180s for a large cron prompt, set provider-level `stale_timeout_seconds` before changing job schedules or models.
+
+## 8. Agent Inactivity Timeout (HERMES_CRON_TIMEOUT)
+
+**Source:** `scheduler.py:1844-1930`.
+
+Cron agent jobs run with an *inactivity*-based timeout (not a wall-clock
+timeout). The agent can run for hours if it's actively calling tools and
+receiving stream tokens, but if it goes idle (no activity) for the configured
+duration, it's killed.
+
+- **Default:** 600s (10 minutes of inactivity)
+- **Override:** `HERMES_CRON_TIMEOUT` env var (seconds). `0` = unlimited.
+- **NOT configurable via config.yaml** — env var only.
+- **Activity tracker:** `_touch_activity()` updates on every tool call, API
+  call, and stream delta. The scheduler polls every 5s and checks
+  `seconds_since_activity`.
+
+This is separate from `cron.script_timeout_seconds` (which governs `no_agent`
+script jobs). Agent jobs use `HERMES_CRON_TIMEOUT`; script jobs use
+`script_timeout_seconds`.
+
+## 9. Broken Pipe / Stale Stream Error Flow (agent-driven cron jobs)
+
+When a cron agent job fails with `RuntimeError: [Errno 32] Broken pipe`:
+
+1. Check journalctl for the preceding line. If you see `Stream stale for Ns (threshold Ns) — no chunks received ... Killing connection`, Hermes force-closed the provider stream because the model produced no chunks before the stale threshold.
+2. The forced close surfaces as `ReadError` / `[Errno 32] Broken pipe` in `chat_completion_helpers.py`.
+3. The agent retries up to `api_max_retries` times (default 3) with exponential backoff. For rate-limit/billing errors, fallback is eager; for `ReadError`/stale-stream paths, fallback may only happen after primary retries are exhausted.
+4. If fallback is configured, the agent may switch to the next provider/model; that fallback provider also needs an adequate `stale_timeout_seconds` or it can hit the same false stale kill.
+5. If all attempts fail, `run_conversation` returns `{failed: True, error: "[Errno 32] Broken pipe"}` and `scheduler.py` records `RuntimeError: [Errno 32] Broken pipe` with `last_status: error`.
+
+**Fix order:**
+1. Set provider-level stale timeouts for both primary and fallback providers, e.g. `providers.deepseek.stale_timeout_seconds: 600` and `providers.opencode-go.stale_timeout_seconds: 600`.
+2. Ensure `fallback_providers` is non-empty for unattended production profiles.
+3. Re-run the failed cron once and verify the output file + `last_status: ok`.
+
+Do not diagnose this as a Telegram delivery-pipe issue unless there is no `Stream stale` / provider `ReadError` evidence in the gateway journal.

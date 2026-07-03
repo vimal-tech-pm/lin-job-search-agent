@@ -37,7 +37,8 @@ header.top .right { margin-left: auto; display: flex; gap: 8px; align-items: cen
 
 /* ---------- rail ---------- */
 nav.rail { background: var(--panel); border: 1px solid var(--br); border-radius: var(--radius); padding: 8px; align-self: start; position: sticky; top: 10px; }
-.rail .stage { display: flex; align-items: center; gap: 6px; width: 100%; text-align: left; background: none; border: 0; color: var(--fg); padding: 5px 8px; border-radius: var(--radius); }
+.rail .stagerow { display: flex; align-items: center; gap: 4px; }
+.rail .stage { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; text-align: left; background: none; border: 0; color: var(--fg); padding: 5px 8px; border-radius: var(--radius); white-space: nowrap; }
 .rail .stage:hover { background: var(--panel2); }
 .rail .stage.on { background: var(--acbg); color: var(--acfg); }
 .rail .stage .n { margin-left: auto; color: var(--mut); font-variant-numeric: tabular-nums; }
@@ -67,6 +68,7 @@ table.main th[data-col]:hover { color: var(--fg); }
 table.main th[data-col][data-dir="asc"]::after { content: " ▲"; }
 table.main th[data-col][data-dir="desc"]::after { content: " ▼"; }
 table.main td { padding: var(--row-pad); border-top: 1px solid var(--br); vertical-align: top; }
+table.main tr.r { cursor: pointer; }
 table.main tr.r:hover td { background: var(--panel2); }
 td.co .role { display: var(--role-display); color: var(--mut); font-size: .92em; }
 td.co .role::before { content: var(--role-sep); }
@@ -79,17 +81,37 @@ td.co b { font-weight: 600; }
 .chip.stage-applied { color: var(--ok); border-color: var(--ok); }
 .chip.stage-staged, .chip.stage-built { color: var(--warn); border-color: var(--warn); }
 .chip.stage-wont, .chip.stage-closed, .chip.stage-skip { color: var(--mut); }
+.chip.stage-interviewing { color: var(--ac); border-color: var(--ac); }
+.chip.stage-offer { background: var(--ok); color: #fff; border-color: var(--ok); }
+.chip.stage-rejected, .chip.stage-expired { color: var(--bad); border-color: var(--bad); }
+.chip.stage-declined { color: var(--warn); border-color: var(--warn); }
+.chip.stage-withdrew { color: var(--mut); border-color: var(--mut); }
+.depth { margin-left: 6px; font-size: .78em; color: var(--mut); white-space: nowrap; }
+.pay { font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
+.pay-top { color: var(--ok); } .pay-high { color: var(--ok); } .pay-mid { color: var(--warn); } .pay-low { color: var(--mut); } .pay-unknown { color: var(--mut); opacity: .55; }
+.rec { font-size: .85em; white-space: nowrap; }
+.rec-d1 { color: var(--ok); font-weight: 600; } .rec-d7 { color: var(--ok); } .rec-d30 { color: var(--warn); } .rec-old { color: var(--mut); } .rec-none { color: var(--mut); opacity: .55; }
+.osel { background: var(--panel2); color: var(--fg); border: 1px solid var(--br); border-radius: 6px; padding: 1px 4px; font-size: .85em; }
 .score { font-variant-numeric: tabular-nums; font-weight: 600; }
 .score.hi { color: var(--ok); } .score.mid { color: var(--warn); } .score.lo { color: var(--mut); }
 .ca-yes { color: var(--ok); } .ca-no { color: var(--bad); } .ca-unknown { color: var(--mut); }
+
+.ats { font-size: .85em; white-space: nowrap; }
+.ats-greenhouse { color: #2ea44f; } .ats-ashby { color: #6b47ff; } .ats-workday { color: var(--mut); }
+.ats-lever { color: var(--mut); } .ats-linkedin { color: #0a66c2; } .ats-indeed { color: #2164f3; }
+.ats-other { color: var(--mut); }
+
+.lvl { font-size: .82em; font-weight: 600; white-space: nowrap; }
 
 td.act { white-space: nowrap; text-align: right; }
 .btn { border: 1px solid var(--br); background: var(--panel2); color: var(--fg); border-radius: var(--chip-radius); padding: 2px 9px; font-size: .88em; }
 .btn.pri { background: var(--acbg); color: var(--acfg); border-color: var(--acbg); }
 .btn.ok { background: var(--ok); color: #fff; border-color: var(--ok); }
 .btn.warn { color: var(--bad); }
+.btn.geo { color: var(--warn); border-color: var(--warn); background: none; }
 .btn[disabled] { opacity: .5; cursor: default; }
 .btn.done { background: none; border: 0; color: var(--ok); }
+.ok-chip { color: var(--ok); font-weight: 600; font-size: .9em; }
 .await { color: var(--warn); font-size: .88em; }
 .xbtn { background: none; border: 0; color: var(--mut); padding: 2px 4px; }
 

@@ -74,10 +74,10 @@ The helper stores URL/company/role/sender-domain/date/confidence only. It must n
 
 When the user asks to check for status updates on applied jobs:
 
-**Backend:** This profile uses **himalaya** (not the Google Workspace API) for Gmail access. The `himalaya` skill is at `email/himalaya/SKILL.md`. The lin profile sandboxes $HOME, so ALL himalaya commands need `HOME=$LIN_REAL_HOME` prefix.
+**Backend:** This profile uses **himalaya** (not the Google Workspace API) for Gmail access. The `himalaya` skill is at `email/himalaya/SKILL.md`. The lin profile sandboxes $HOME, so ALL himalaya commands need `HOME=~` prefix.
 
 ```bash
-HOME=$LIN_REAL_HOME himalaya envelope list --folder "INBOX" --page-size 200 --max-width 400
+HOME=~ himalaya envelope list --folder "INBOX" --page-size 200 --max-width 400
 ```
 
 **Scan strategy:**
@@ -87,7 +87,7 @@ HOME=$LIN_REAL_HOME himalaya envelope list --folder "INBOX" --page-size 200 --ma
    - Rejection signals: `unfortunately|not moving|no longer|will not be|position has been|regret to inform|not selected`
    - Offer signals: `offer letter|pleased to offer|compensation|start date`
 3. Search by company domain for direct matches: `@company.com`
-4. Read any hit messages fully with `HOME=$LIN_REAL_HOME himalaya message read <ID>`
+4. Read any hit messages fully with `HOME=~ himalaya message read <ID>`
 
 **Status mapping to lin:**
 | Email signal | job.yml update |

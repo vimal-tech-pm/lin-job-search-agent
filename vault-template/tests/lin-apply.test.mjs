@@ -15,7 +15,7 @@ function makeVault(jobYml) {
   fs.copyFileSync(APPLY_SCRIPT, path.join(v, 'scripts', 'lin-apply.mjs'));
   fs.copyFileSync(TRACKER_SCRIPT, path.join(v, 'scripts', 'lin-tracker.mjs'));
   fs.mkdirSync(path.join(v, 'career-profile'), { recursive: true });
-  fs.writeFileSync(path.join(v, 'career-profile', 'profile.yml'), 'candidate:\n  full_name: Alex Morgan\n');
+  fs.writeFileSync(path.join(v, 'career-profile', 'profile.yml'), 'candidate:\n  full_name: Jane Doe\n');
   fs.writeFileSync(path.join(v, 'career-profile', 'pipeline-config.json'), '{"promote_threshold":3.95,"daily":{}}\n');
   fs.writeFileSync(path.join(v, 'data', 'evaluation-queue.json'), JSON.stringify({ schema_version: 1, bootstrap: {}, roles: [] }));
   fs.writeFileSync(path.join(v, 'data', 'pipeline.md'), '');

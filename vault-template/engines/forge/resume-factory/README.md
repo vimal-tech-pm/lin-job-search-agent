@@ -35,10 +35,10 @@ The builder accepts: `<input.md> <theme-name> <output-name> [--pdf] [--validate-
 
 ```bash
 # Validate only
-node resume-factory/scripts/build-resume.js source_files/Vimal_Sekar_Master_Resume.md executive-clean out/resume --validate-only
+node resume-factory/scripts/build-resume.js source_files/Your_Name_Master_Resume.md executive-clean out/resume --validate-only
 
 # Build DOCX + PDF
-node resume-factory/scripts/build-resume.js source_files/Vimal_Sekar_Master_Resume.md executive-clean out/Vimal_Sekar_Resume --pdf
+node resume-factory/scripts/build-resume.js source_files/Your_Name_Master_Resume.md executive-clean out/Your_Name_Resume --pdf
 ```
 
 Any saved resume Markdown intended for export should match the schema in `references/md-format-spec.md`.

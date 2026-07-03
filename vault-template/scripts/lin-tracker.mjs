@@ -16,7 +16,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as data from "./lib/tracker-data.mjs";
-import { renderTracker, renderWinRate } from "./lib/tracker-md.mjs";
+import { renderTracker, renderWinRate, renderFunnel } from "./lib/tracker-md.mjs";
 import { renderHtml } from "./lib/tracker-html.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -34,6 +34,7 @@ try {
 const jobs = data.walkJobs();
 const backlog = data.readPathfinderBacklog();
 const wr = data.computeWinRate(jobs);
+const funnel = data.computeFunnel(jobs);
 const queue = data.readEvaluationQueue(jobs);
 const pipelineRows = data.readPipelineRows();
 const pendingCount = pipelineRows.length;
@@ -56,11 +57,15 @@ fs.mkdirSync(dataDir, { recursive: true });
 
 const trackerPath = path.join(dataDir, "applications.md");
 const htmlPath = path.join(dataDir, "applications.html");
-const winRatePath = path.join(dataDir, "win-rate.md");
+const engineUsagePath = path.join(dataDir, "resume-engine-usage.md");
+const funnelPath = path.join(dataDir, "outcome-funnel.md");
 
 fs.writeFileSync(trackerPath, renderTracker(jobs, wr, queue, pipelineRows));
 fs.writeFileSync(htmlPath, renderHtml({ rows, wr, generatedAt }));
-fs.writeFileSync(winRatePath, renderWinRate(wr));
+fs.writeFileSync(engineUsagePath, renderWinRate(wr));
+fs.writeFileSync(funnelPath, renderFunnel(funnel));
+// Retire the old, misleadingly-named cache once the rename has run.
+try { fs.rmSync(path.join(dataDir, "win-rate.md"), { force: true }); } catch {}
 
 // Digest summary — emitted to stdout so cron prompts can echo it verbatim.
 console.log("Lin funnel digest:");
@@ -84,6 +89,8 @@ console.log(`Evaluation queue:   ${queue.length} open role(s)`);
 console.log(`Win-rate window (${wr.windowDays}d): ${wr.total} apps`);
 console.log(`  PATHFINDER: ${wr.tally.pathfinder} (${wr.pct(wr.tally.pathfinder)})`);
 console.log(`  FORGE:      ${wr.tally.forge} (${wr.pct(wr.tally.forge)})`);
+console.log(`Funnel (applied ${funnel.total}): interview ${funnel.counts.interviewing} · final ${funnel.counts.final} · offer ${funnel.counts.offer}`);
 console.log(`Wrote: ${trackerPath}`);
 console.log(`Wrote: ${htmlPath}`);
-console.log(`Wrote: ${winRatePath}`);
+console.log(`Wrote: ${engineUsagePath}`);
+console.log(`Wrote: ${funnelPath}`);

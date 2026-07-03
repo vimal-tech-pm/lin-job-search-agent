@@ -36,6 +36,7 @@ function pythonBin() {
   return 'python3';
 }
 const PYTHON = pythonBin();
+const DRY_RUN = process.argv.slice(2).includes('--dry-run');
 
 function readJson(file, fallback) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return fallback; }
@@ -161,6 +162,81 @@ function extractUrls(text) {
   return keep;
 }
 
+function himalayaOk() {
+  const r = spawnSync('himalaya', ['--version'], { encoding: 'utf8' });
+  if (r.status !== 0) return false;
+  return fs.existsSync(`${os.homedir()}/.config/himalaya/config.toml`);
+}
+
+// himalaya `from` search terms: one bare domain label per configured alert sender
+// (e.g. "linkedin", "indeed"). himalaya matches loosely; senderAllowed() re-filters
+// precisely below. Falls back to broad job terms if no senders are configured.
+function himalayaTerms(allowedSenders) {
+  const terms = new Set();
+  for (const s of allowedSenders) {
+    const raw = String(s || '').toLowerCase();
+    const dom = raw.includes('@') ? raw.split('@')[1] : raw;
+    const label = dom.replace(/^www\./, '').split('.')[0];
+    if (label) terms.add(label);
+  }
+  if (!terms.size) ['job', 'recruiter', 'career'].forEach((t) => terms.add(t));
+  return [...terms];
+}
+
+// ── message collection — normalized shape {id, from, subject, date, body, query} ──
+// GAPI primary, himalaya (IMAP) fallback — same dual-backend pattern as
+// lin-gmail-status.mjs. Either reads the same Gmail; no second credential.
+function collectViaGapi(queries, rawLimit) {
+  const msgs = [];
+  const seen = new Set();
+  for (const query of queries) {
+    if (msgs.length >= rawLimit) break;
+    const search = runPython(GAPI, ['gmail', 'search', query, '--max', String(Math.max(rawLimit * 2, 10))]);
+    if (search.status !== 0) { console.error(`gmail: warning: query failed: ${query}`); continue; }
+    for (const m of parseMaybeJson(search.stdout) || []) {
+      if (msgs.length >= rawLimit) break;
+      const id = m.id || m.message_id;
+      if (id && seen.has(id)) continue;
+      if (id) seen.add(id);
+      let body = m.snippet || '';
+      if (id) {
+        const got = runPython(GAPI, ['gmail', 'get', String(id)]);
+        if (got.status === 0) body = (parseMaybeJson(got.stdout) || {}).body || m.snippet || '';
+      }
+      msgs.push({ id: id || null, from: m.from || '', subject: m.subject || '', date: m.date || m.internalDate || '', body, query });
+    }
+  }
+  return msgs;
+}
+
+function collectViaHimalaya(allowedSenders, rawLimit) {
+  // himalaya commands need HOME=~ — the profile sandboxes $HOME, but the
+  // config + keyring live under the real home (see lin-status himalaya sandbox rule).
+  const homeEnv = { ...process.env, HOME: '~' };
+  const msgs = [];
+  const seen = new Set();
+  for (const term of himalayaTerms(allowedSenders)) {
+    if (msgs.length >= rawLimit) break;
+    const r = spawnSync('himalaya',
+      ['envelope', 'list', '--folder', 'INBOX', '--page-size', '200', '-o', 'json', 'from', term],
+      { cwd: VAULT, encoding: 'utf8', maxBuffer: 8 * 1024 * 1024, env: homeEnv, timeout: 30000 });
+    if (r.status !== 0) continue;
+    for (const e of parseMaybeJson(r.stdout) || []) {
+      if (msgs.length >= rawLimit) break;
+      const id = String(e.id || '');
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      const from = e.from ? `${e.from.name || ''} <${e.from.addr || ''}>` : '';
+      let body = '';
+      const br = spawnSync('himalaya', ['message', 'read', id],
+        { cwd: VAULT, encoding: 'utf8', maxBuffer: 4 * 1024 * 1024, env: homeEnv, timeout: 20000 });
+      if (br.status === 0) body = String(br.stdout).slice(0, 12000);
+      msgs.push({ id, from, subject: e.subject || '', date: e.date || '', body, query: `himalaya:from ${term}` });
+    }
+  }
+  return msgs;
+}
+
 function main() {
   const channels = readJson(CHANNELS, {});
   const gmail = channels.gmail || {};
@@ -177,59 +253,46 @@ function main() {
   // dedup, and scan_gmail_cap enforcement. This prevents early duplicate/weak
   // URLs from consuming the final daily cap.
   const rawLimit = Math.min(Math.max(appendLimit * 5, appendLimit + 25, 50), 500);
-  if (!authOk()) {
-    console.log('gmail: Google Workspace not authenticated; run google-workspace OAuth setup with --services email,calendar. No results fabricated.');
-    return;
-  }
 
+  const allowedSenders = Array.isArray(gmail.alert_senders) ? gmail.alert_senders : [];
   const queries = Array.isArray(gmail.queries) && gmail.queries.length
     ? gmail.queries
     : [`newer_than:${gmail.lookback_days || 14}d (subject:(job OR career OR recruiter) OR from:(linkedin.com OR greenhouse.io OR lever.co OR ashbyhq.com OR workday.com))`];
+
+  let backend, messages;
+  if (authOk()) { backend = 'gapi'; messages = collectViaGapi(queries, rawLimit); }
+  else if (himalayaOk()) { backend = 'himalaya'; messages = collectViaHimalaya(allowedSenders, rawLimit); }
+  else { console.log('gmail: neither Google Workspace OAuth nor himalaya is available — scan skipped (no results fabricated).'); return; }
+
   const candidates = [];
   const seenUrls = new Set();
-  const allowedSenders = Array.isArray(gmail.alert_senders) ? gmail.alert_senders : [];
-
-  for (const query of queries) {
+  for (const msg of messages) {
     if (candidates.length >= rawLimit) break;
-    const search = runPython(GAPI, ['gmail', 'search', query, '--max', String(Math.max(rawLimit * 2, 10))]);
-    if (search.status !== 0) {
-      console.error(`gmail: warning: query failed: ${query}`);
-      continue;
-    }
-    const messages = parseMaybeJson(search.stdout) || [];
-    for (const msg of messages) {
+    if (!senderAllowed(msg.from, allowedSenders)) continue;
+    const domain = senderDomain(msg.from);
+    const haystack = `${msg.subject || ''}\n${msg.body || ''}`;
+    for (const url of extractUrls(haystack)) {
       if (candidates.length >= rawLimit) break;
-      const id = msg.id || msg.message_id;
-      const from = msg.from || '';
-      if (!senderAllowed(from, allowedSenders)) continue;
-      const domain = senderDomain(from);
-      const subject = msg.subject || '';
-      const date = msg.date || msg.internalDate || new Date().toISOString();
-      let haystack = `${subject}\n${msg.snippet || ''}`;
-      if (id) {
-        const got = runPython(GAPI, ['gmail', 'get', String(id)]);
-        if (got.status === 0) {
-          const full = parseMaybeJson(got.stdout) || {};
-          haystack += `\n${full.body || ''}`;
-        }
-      }
-      for (const url of extractUrls(haystack)) {
-        if (candidates.length >= rawLimit) break;
-        if (seenUrls.has(url)) continue;
-        seenUrls.add(url);
-        candidates.push({
-          company: urlCompany(url, domain),
-          role: roleFromSubject(subject),
-          url,
-          source: 'gmail',
-          source_query: query,
-          source_item_id: id || null,
-          seen_at: isoDate(date),
-          confidence: 'medium',
-          notes: domain ? `sender-domain:${domain}` : '',
-        });
-      }
+      if (seenUrls.has(url)) continue;
+      seenUrls.add(url);
+      candidates.push({
+        company: urlCompany(url, domain),
+        role: roleFromSubject(msg.subject),
+        url,
+        source: 'gmail',
+        source_query: msg.query || '',
+        source_item_id: msg.id || null,
+        seen_at: isoDate(msg.date),
+        confidence: 'medium',
+        notes: domain ? `sender-domain:${domain}` : '',
+      });
     }
+  }
+
+  console.log(`gmail: backend=${backend}, messages=${messages.length}, candidates=${candidates.length}${DRY_RUN ? ' (dry-run)' : ''}`);
+  if (DRY_RUN) {
+    for (const c of candidates.slice(0, 15)) console.log(`  • ${c.company} — ${c.role} — ${c.url}`);
+    return;
   }
 
   const tmp = path.join(os.tmpdir(), `lin-gmail-candidates-${process.pid}.json`);

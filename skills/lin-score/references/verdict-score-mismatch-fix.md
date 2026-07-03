@@ -51,7 +51,7 @@ Replace with the correct verdict string. Regex: `\*\*Verdict:\*\*\s*[Ss][Kk][Ii]
 ### Step 3: Refresh tracker
 
 ```bash
-HOME=$LIN_REAL_HOME node scripts/lin-tracker.mjs
+HOME=~ node scripts/lin-tracker.mjs
 ```
 
 ### Step 4: Prevent recurrence

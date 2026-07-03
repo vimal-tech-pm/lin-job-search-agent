@@ -92,7 +92,7 @@ Known quirk: `--dry-run` still fetches the JD (live HTTP) even though nothing is
 ## Verification results
 
 ```bash
-cd $LIN_REAL_HOME/.hermes/profiles/lin/lin
+cd ~/.hermes/profiles/lin/lin
 node scripts/lin-evaluation-queue.mjs validate
 # → validate: ok — 10 role(s)
 

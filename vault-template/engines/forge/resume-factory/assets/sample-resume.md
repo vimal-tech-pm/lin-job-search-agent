@@ -3,7 +3,7 @@ name: "Alex Morgan"
 title: "Senior Product Manager"
 tagline: "Product Strategy & Roadmap | Platform Modernization | Agile Delivery | Data-Driven Growth"
 contact:
-  phone: "+1 905 872 1552"
+  phone: "555-000-0000"
   email: "you@example.com"
   linkedin: "linkedin.com/in/alexmorgan"
   linkedin_url: "https://www.linkedin.com/in/alexmorgan/"

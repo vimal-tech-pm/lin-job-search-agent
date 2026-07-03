@@ -22,18 +22,28 @@ function makeVault() {
   fs.mkdirSync(path.join(v, 'career-profile'), { recursive: true });
   fs.mkdirSync(path.join(v, 'data'), { recursive: true });
   fs.mkdirSync(path.join(v, 'companies'), { recursive: true });
-  fs.writeFileSync(path.join(v, 'career-profile', 'profile.yml'), 'candidate:\n  full_name: Alex Morgan\n');
+  fs.writeFileSync(path.join(v, 'career-profile', 'profile.yml'), 'candidate:\n  full_name: Jane Doe\n');
   fs.writeFileSync(path.join(v, 'career-profile', 'pipeline-config.json'), JSON.stringify({ promote_threshold: 3.95 }));
   fs.writeFileSync(path.join(v, 'data', 'pipeline.md'), '');
   fs.writeFileSync(path.join(v, 'data', 'evaluation-queue.json'), JSON.stringify({
-    schema_version: 1, bootstrap: {}, roles: [{
-      id: '800', company: 'ClickCo', co_slug: 'clickco', role: 'Senior PM', job_slug: 'senior-pm',
-      url: 'https://example.com/jobs/800', score: 4.3, verdict: 'Strong apply',
-      recommendation: 'review', queue_state: 'evaluated', canada_eligible: 'yes',
-      geo_gate: { reason: null, blocks_stage: false },
-      promotion: { promoted_at: null, job_folder: null, error: null },
-      liveness: { checked_at: null, result: null, reason: null }, notes: [],
-    }],
+    schema_version: 1, bootstrap: {}, roles: [
+      {
+        id: '800', company: 'ClickCo', co_slug: 'clickco', role: 'Senior PM', job_slug: 'senior-pm',
+        url: 'https://example.com/jobs/800', score: 4.3, verdict: 'Strong apply',
+        recommendation: 'review', queue_state: 'evaluated', canada_eligible: 'yes',
+        geo_gate: { reason: null, blocks_stage: false },
+        promotion: { promoted_at: null, job_folder: null, error: null },
+        liveness: { checked_at: null, result: null, reason: null }, notes: [],
+      },
+      {
+        id: '801', company: 'SkipCo', co_slug: 'skipco', role: 'Borderline PM', job_slug: 'borderline-pm',
+        url: 'https://example.com/jobs/801', score: 2.5, verdict: 'Skip',
+        recommendation: 'skip', queue_state: 'evaluated', canada_eligible: 'yes',
+        geo_gate: { reason: null, blocks_stage: false },
+        promotion: { promoted_at: null, job_folder: null, error: null },
+        liveness: { checked_at: null, result: null, reason: null }, notes: [],
+      },
+    ],
   }));
   return v;
 }
@@ -81,4 +91,50 @@ test('dashboard click-through: Prepare flags the queue row; theme toggle persist
   await page.click('tr.r[data-id="800"] button.xbtn');
   const xpVisible = await page.isVisible('tr.r[data-id="800"] + tr.xp');
   assert.equal(xpVisible, true);
+});
+
+test('dashboard bulk Prepare anyway works on Skip tab and exposes sticky run-pipeline', { skip: !HAVE_PW, timeout: 120000 }, async (t) => {
+  const v = makeVault();
+  const gen = spawnSync(process.execPath, [path.join(v, 'scripts', 'lin-tracker.mjs')], { encoding: 'utf8' });
+  assert.equal(gen.status, 0, gen.stderr);
+
+  const port = 21000 + Math.floor(Math.random() * 2000);
+  const server = spawn(process.execPath, [path.join(v, 'scripts', 'lin-serve.mjs')], {
+    env: { ...process.env, LIN_SERVE_PORT: String(port), LIN_HERMES_BIN: '/bin/echo' },
+  });
+  t.after(() => server.kill());
+  for (let i = 0; i < 40; i++) {
+    try { if ((await fetch(`http://127.0.0.1:${port}/health`)).ok) break; } catch {}
+    await new Promise((r) => setTimeout(r, 150));
+  }
+
+  const { chromium } = await import(PW_PATH + '/index.mjs').catch(() => import(PW_PATH));
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+  page.on('dialog', (d) => {
+    assert.match(d.message(), /skipped by Lin/);
+    d.accept();
+  });
+  await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'load' });
+
+  await page.click('.rail .grouphead[data-group="archive-group"]');
+  await page.click('.rail .stage[data-stage="skip"]');
+  await page.waitForSelector('tr.r[data-id="801"]', { state: 'visible', timeout: 10000 });
+  await page.check('tr.r[data-id="801"] input.sel');
+
+  await page.waitForSelector('#selbar.show #bulk-prepare', { state: 'visible', timeout: 10000 });
+  assert.equal(await page.textContent('#bulk-prepare'), 'Prepare anyway');
+  assert.equal(await page.isVisible('#bulk-run-pipeline'), false);
+
+  await page.click('#bulk-prepare');
+  await page.waitForFunction(() =>
+    document.querySelector('tr.r[data-id="801"] td.act')?.textContent.includes('requested'), null, { timeout: 10000 });
+
+  assert.equal(await page.isVisible('#bulk-prepare'), false);
+  assert.equal(await page.isVisible('#bulk-run-pipeline'), true);
+  assert.match(await page.textContent('#selbar'), /⚡ Run pipeline now/);
+
+  const queue = JSON.parse(fs.readFileSync(path.join(v, 'data', 'evaluation-queue.json'), 'utf8'));
+  assert.equal(queue.roles.find((r) => r.id === '801').build_requested, true);
 });

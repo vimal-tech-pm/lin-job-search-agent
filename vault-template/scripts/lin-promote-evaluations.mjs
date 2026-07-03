@@ -23,8 +23,9 @@
  *   3. expired → queue.queue_state = 'closed', record reason; no folder
  *   4. uncertain/error → no folder; queue stays 'recommended' with error note
  *
- * Skip selection (without write) if geo_gate.blocks_stage=true — demote to
- * 'review' instead.
+ * Auto selection skips geo_gate.blocks_stage=true before top-N slicing so
+ * blocked rows do not consume slots. Explicit --id/build_requested rows bypass
+ * the geo gate and are logged as human overrides.
  *
  * Dry-run gate: every mutation goes through `if (!isDryRun) …`.
  */
@@ -32,6 +33,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { geoGate } from "./lib/geo-gate.mjs";
+import { canonicalKey } from "./lib/canonical.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -60,6 +63,23 @@ const DISCOVERED_VIA = {
 };
 function discoveredViaFor(source) {
   return DISCOVERED_VIA[source] || "pathfinder-scan";
+}
+
+// --- slugify + normalizeTitle (shared with lin-discovery-append.mjs) ---
+function slugify(s) {
+  return String(s ?? "")
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+function normalizeTitle(title) {
+  return String(title ?? "")
+    .replace(/\([^)]*\)/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/[-–—,|]+\s*$/g, "")
+    .trim()
+    .toLowerCase();
 }
 
 function readPipelineConfig() {
@@ -94,6 +114,7 @@ const LIMIT = parseInt(
 );
 const ONLY_ID = argVal("--id");
 const LIVENESS_FILE = argVal("--liveness-file");
+const selectionStats = { autoGeoBlockedSkipped: 0 };
 
 // ----- queue I/O -----
 
@@ -108,6 +129,43 @@ function readQueue() {
 function writeQueue(q) {
   q.generated_at = new Date().toISOString();
   fs.writeFileSync(QUEUE_PATH, JSON.stringify(q, null, 2) + "\n");
+}
+
+// ----- tracker dedup -----
+// Parse engines/pathfinder/data/applications.md and build a set of
+// canonical keys for roles already marked "Applied". This prevents
+// re-staging roles that were already applied to (the scan re-injects
+// them because dedup only checks pipeline.md, not the tracker).
+const TRACKER_PATH = path.join(VAULT, "engines", "pathfinder", "data", "applications.md");
+let _appliedKeys = null;
+
+function getAppliedKeys() {
+  if (_appliedKeys !== null) return _appliedKeys;
+  _appliedKeys = new Set();
+  if (!fs.existsSync(TRACKER_PATH)) return _appliedKeys;
+  const lines = fs.readFileSync(TRACKER_PATH, "utf8").split("\n");
+  for (const line of lines) {
+    if (!line.startsWith("|") || line.startsWith("| #") || line.startsWith("|--")) continue;
+    const parts = line.split("|").map((p) => p.trim());
+    if (parts.length < 6) continue;
+    const company = parts[3];
+    const role = parts[4];
+    const status = parts[5];
+    if (!company || !role || !status) continue;
+    // Block re-staging for roles already applied OR closed/expired
+    if (!/applied|closed|expired|wont|skip|reject/i.test(status)) continue;
+    const key = `${slugify(company)}::${slugify(normalizeTitle(role))}`;
+    _appliedKeys.add(key);
+  }
+  return _appliedKeys;
+}
+
+function isAlreadyApplied(role) {
+  // role.job_title is often null; the title lives in role.role
+  const title = role?.job_title || role?.role || "";
+  if (!role?.company || !title) return false;
+  const key = `${slugify(role.company)}::${slugify(normalizeTitle(title))}`;
+  return getAppliedKeys().has(key);
 }
 
 // ----- selection -----
@@ -153,6 +211,7 @@ function isPromotionSelectable(role) {
   if (!role || role.promotion?.job_folder || existingJobFolderRel(role)) return false;
   if (["staged", "materials_ready", "applied", "skipped", "closed", "duplicate", "error"].includes(role.queue_state)) return false;
   if (role.recommendation === "skip" || role.recommendation === "manual_override") return false;
+  if (isAlreadyApplied(role)) return false;
   return ["recommended", "evaluated"].includes(role.queue_state);
 }
 
@@ -163,26 +222,38 @@ function isTopPrepareSelectable(role) {
   if (promotionBlock(role).blocked) return false;
   if (!Number.isFinite(Number(role.score))) return false;
   if (existingJobFolderState(role).materialsReady) return false;
+  if (isAlreadyApplied(role)) return false;
   return ["recommended", "evaluated", "staged"].includes(role.queue_state);
 }
 
+function shouldBypassPromotionBlock(role) {
+  return Boolean(ONLY_ID || role?.__selected_by === "build_requested");
+}
+
 function pickCandidates(queue) {
+  selectionStats.autoGeoBlockedSkipped = 0;
   const selectable = (queue.roles || []).filter(TOP_PREPARE ? isTopPrepareSelectable : isPromotionSelectable);
   if (ONLY_ID) {
     const hit = selectable.find((r) => r.id === ONLY_ID);
+    if (hit) hit.__selected_by = "manual-id";
     return hit ? [hit] : [];
   }
   let pool;
   if (AUTO) {
-    // Hybrid trigger (design §5): top auto_build_top_n eligible rows ≥ auto_build_floor,
-    // plus every build_requested row ≥ promote_threshold.
+    // Hybrid trigger (design §5): the day's top auto_build_top_n applyable rows by score
+    // (geo-blocked excluded — no point auto-preparing roles you can't apply to). The
+    // intent of top-N is to keep ~N submit-ready packages on hand daily; auto_build_floor
+    // is just an absolute junk cutoff, not a per-day cap.
+    // PLUS every build_requested row regardless of score — an explicit Prepare click is
+    // the superuser's decision and overrides both the score floor and the geo gate.
     const byScore = [...selectable].sort((a, b) => (Number(b.score) || 0) - (Number(a.score) || 0));
-    const autoTop = byScore
-      .filter((r) => (Number(r.score) || 0) >= PIPELINE_CONFIG.auto_build_floor)
-      .slice(0, PIPELINE_CONFIG.auto_build_top_n);
+    const floorPool = byScore.filter((r) => (Number(r.score) || 0) >= PIPELINE_CONFIG.auto_build_floor);
+    const autoEligible = floorPool.filter((r) => !promotionBlock(r).blocked);
+    selectionStats.autoGeoBlockedSkipped = floorPool.length - autoEligible.length;
+    const autoTop = autoEligible.slice(0, PIPELINE_CONFIG.auto_build_top_n);
     for (const r of autoTop) r.__selected_by = "auto-top-n";
     const requested = byScore.filter(
-      (r) => r.build_requested === true && (Number(r.score) || 0) >= THRESHOLD && !autoTop.includes(r),
+      (r) => r.build_requested === true && !autoTop.includes(r),
     );
     for (const r of requested) r.__selected_by = "build_requested";
     pool = [...autoTop, ...requested].sort((a, b) => (Number(b.score) || 0) - (Number(a.score) || 0));
@@ -198,10 +269,14 @@ function pickCandidates(queue) {
 }
 
 function promotionBlock(role) {
-  if (role.geo_gate?.blocks_stage) {
+  // The blocked DECISION lives in lib/geo-gate.mjs (shared with the dashboard so
+  // the two can't drift). Reason strings stay here — they're recorded verbatim in
+  // queue demote notes and must keep their existing internal format.
+  const g = geoGate(role);
+  if (g.cause === "geo") {
     return { blocked: true, reason: role.geo_gate.reason || "geo_gate blocks_stage=true" };
   }
-  if (role.canada_eligible === "no") {
+  if (g.cause === "canada") {
     return { blocked: true, reason: role.canada_eligible_reason || "canada_eligible=no" };
   }
   return { blocked: false, reason: "" };
@@ -209,6 +284,8 @@ function promotionBlock(role) {
 
 function candidatePayload(role) {
   const folder = existingJobFolderState(role);
+  const block = promotionBlock(role);
+  const bypassesBlock = block.blocked && shouldBypassPromotionBlock(role);
   return {
     id: role.id,
     company: role.company,
@@ -221,6 +298,8 @@ function candidatePayload(role) {
     queue_state: role.queue_state,
     canada_eligible: role.canada_eligible || "unknown",
     canada_eligible_reason: role.canada_eligible_reason || "",
+    geo_gate_bypassed: bypassesBlock || undefined,
+    geo_gate_reason: bypassesBlock ? block.reason : undefined,
     source: role.source || "portal",
     job_folder: folder.rel,
     folder_state: folder.state,
@@ -261,6 +340,11 @@ function readLivenessResults(filePath) {
       row.apply_path_found ?? row.has_apply_path ?? row.applyPathFound ?? row.apply_path ?? null;
     const checkedUrl = row.checked_url || row.url || row.source_url || null;
     const checkedBy = row.checked_by || parsed.checked_by || "hermes-browser";
+    // Did the apply form ask for a cover letter? Recorded by the stage agent while it
+    // inspects the application page during liveness; threaded into job.yml.cover_required
+    // so finalize can auto-generate one. Conservative: true only when clearly observed.
+    const coverRequired =
+      (row.cover_required ?? row.cover_field_found ?? row.coverRequired ?? false) === true;
     let reason = row.evidence || row.reason || row.message || "external liveness result supplied";
 
     // LinkedIn often leaves stale JD text visible after the job stops accepting
@@ -293,6 +377,7 @@ function readLivenessResults(filePath) {
       checked_url: checkedUrl,
       checked_by: checkedBy,
       apply_path_found: applyPathFound,
+      cover_required: coverRequired,
     });
   }
   return byId;
@@ -381,6 +466,59 @@ async function fetchJd(url) {
   }
 }
 
+// ----- URL helpers -----
+
+// about:link-XXX placeholders come from the LinkedIn scanner when it can't
+// extract the real URL from the page. Resolve them from available sources
+// in priority order: liveness checked_url → jd_eval JSON → fallback.
+const PLACEHOLDER_RE = /^about:/i;
+
+function resolveUrl(role) {
+  const raw = role.url || "";
+  if (!PLACEHOLDER_RE.test(raw)) return raw;
+  
+  // 1) Liveness check result — the browser worker found the real URL
+  if (role.liveness?.checked_url && !PLACEHOLDER_RE.test(role.liveness.checked_url)) {
+    console.log(`[url-resolve] #${role.id} placeholder ${raw} → ${role.liveness.checked_url} (from liveness)`);
+    return role.liveness.checked_url;
+  }
+  
+  // 2) jd_eval_{id}.json — the evaluation wrote the real job_url there
+  const jdEvalPath = path.join(VAULT, `jd_eval_${role.id}.json`);
+  if (fs.existsSync(jdEvalPath)) {
+    try {
+      const jdEval = JSON.parse(fs.readFileSync(jdEvalPath, "utf8"));
+      const jobUrl = jdEval.job_url || jdEval.source_url || jdEval.url || "";
+      if (jobUrl && !PLACEHOLDER_RE.test(jobUrl)) {
+        console.log(`[url-resolve] #${role.id} placeholder ${raw} → ${jobUrl} (from jd_eval)`);
+        return jobUrl;
+      }
+    } catch {}
+  }
+  
+  // 3) Report file — contains the posting URL in some cases
+  if (role.report) {
+    const reportPath = path.join(VAULT, role.report);
+    if (fs.existsSync(reportPath)) {
+      const reportText = fs.readFileSync(reportPath, "utf8");
+      const urlMatch = reportText.match(/https?:\/\/[^\s"')\]]{10,500}/);
+      if (urlMatch) {
+        const reportUrl = urlMatch[0].replace(/[)\]\.,;]+$/, "");
+        if (!PLACEHOLDER_RE.test(reportUrl)) {
+          console.log(`[url-resolve] #${role.id} placeholder ${raw} → ${reportUrl} (from report)`);
+          return reportUrl;
+        }
+      }
+    }
+  }
+  
+  return raw;
+}
+
+function isPlaceholderUrl(url) {
+  return PLACEHOLDER_RE.test(String(url || ""));
+}
+
 // ----- writers -----
 
 function ymlEscape(v) {
@@ -396,19 +534,22 @@ function ymlEscape(v) {
 
 function renderJobYml(role) {
   const today = new Date().toISOString().slice(0, 10);
+  const resolvedUrl = resolveUrl(role);
   const lines = [
     `job_slug: ${role.job_slug}`,
     `company_slug: ${role.co_slug}`,
     `title: ${ymlEscape(role.role)}`,
     `location: ${ymlEscape(role.location || "Not specified")}`,
-    `source_url: ${role.url}`,
+    `source_url: ${resolvedUrl}`,
     `discovered_via: ${discoveredViaFor(role.source || "portal")}`,
     `discovered_at: ${role.discovered_at || today}`,
+    `posted_date: ${/^\d{4}-\d{2}-\d{2}/.test(String(role.posted_date ?? "")) ? String(role.posted_date).slice(0, 10) : "null"}`,
     `status: staged`,
     `pathfinder_score: ${role.score}`,
     `pathfinder_verdict: ${ymlEscape(role.verdict || "")}`,
     `pathfinder_report: pathfinder-eval.md`,
     `ats_winner: null`,
+    `cover_required: ${role.cover_required === true}`,
     `canada_eligible: ${role.canada_eligible || "unknown"}`,
     `canada_eligible_reason: ${ymlEscape(role.canada_eligible_reason || "")}`,
     // Source provenance — carried through from the queue so the tracker can
@@ -423,6 +564,7 @@ function renderJobYml(role) {
 }
 
 function renderJobMd(role, jdText, jdSource) {
+  const resolvedUrl = resolveUrl(role);
   const evalSummary = [
     `**PATHFINDER score:** ${role.score}/5`,
     `**Verdict:** ${role.verdict || "—"}`,
@@ -435,7 +577,7 @@ function renderJobMd(role, jdText, jdSource) {
   return [
     `# ${role.company} — ${role.role}`,
     "",
-    `**Source URL:** ${role.url}`,
+    `**Source URL:** ${resolvedUrl}`,
     `**Captured:** ${new Date().toISOString().slice(0, 10)} (via lin-promote-evaluations)`,
     "",
     "## Evaluation summary",
@@ -470,22 +612,25 @@ async function main() {
   const picks = pickCandidates(queue);
 
   if (LIST_CANDIDATES) {
-    const candidates = picks.filter((role) => !promotionBlock(role).blocked).map(candidatePayload);
+    const candidates = picks.filter((role) => !promotionBlock(role).blocked || shouldBypassPromotionBlock(role)).map(candidatePayload);
     if (JSON_OUTPUT) {
       console.log(JSON.stringify({
         selection_mode: AUTO ? "auto" : TOP_PREPARE ? "top_prepare" : "threshold",
         threshold: TOP_PREPARE ? null : THRESHOLD,
         auto_build_floor: AUTO ? PIPELINE_CONFIG.auto_build_floor : undefined,
         auto_build_top_n: AUTO ? PIPELINE_CONFIG.auto_build_top_n : undefined,
+        geo_blocked_auto_skipped: AUTO ? selectionStats.autoGeoBlockedSkipped : undefined,
         limit: LIMIT || null,
         candidates,
       }, null, 2));
     } else {
       const label = AUTO ? `auto (top-${PIPELINE_CONFIG.auto_build_top_n} ≥ ${PIPELINE_CONFIG.auto_build_floor} + requested)` : TOP_PREPARE ? "top-prepare" : `threshold=${THRESHOLD}`;
       console.log(`lin-promote-evaluations candidates — ${label}${LIMIT ? `, limit=${LIMIT}` : ""}`);
+      if (AUTO) console.log(`Geo-blocked auto-skipped: ${selectionStats.autoGeoBlockedSkipped}`);
       if (!candidates.length) console.log("No candidates matched.");
       for (const c of candidates) {
-        console.log(`#${c.id} ${c.company} / ${c.job_slug} — ${c.score}/5 — ${c.source_url}`);
+        const override = c.geo_gate_bypassed ? ` — geo override: ${c.geo_gate_reason}` : "";
+        console.log(`#${c.id} ${c.company} / ${c.job_slug} — ${c.score}/5 — ${c.source_url}${override}`);
       }
     }
     return;
@@ -517,9 +662,10 @@ async function main() {
       continue;
     }
 
-    // Geo/Canada gate — demote (not promote) if blocked.
+    // Geo/Canada gate — auto/threshold promotions are blocked, but explicit
+    // human requests (--id or build_requested) intentionally bypass the gate.
     const block = promotionBlock(role);
-    if (block.blocked) {
+    if (block.blocked && !shouldBypassPromotionBlock(role)) {
       console.log(`[skip] ${tag} — promotion blocked (${block.reason}); would demote to review`);
       if (!isDryRun) {
         role.queue_state = "evaluated";
@@ -528,6 +674,9 @@ async function main() {
         mutated = true;
       }
       continue;
+    }
+    if (block.blocked) {
+      console.log(`[override] ${tag} — building despite geo gate (${block.reason}) via ${role.__selected_by || "manual"}`);
     }
 
     console.log(`[liveness] ${tag} — external browser result for ${role.url}`);
@@ -542,6 +691,8 @@ async function main() {
         checked_url: live.checked_url || role.url,
         checked_by: live.checked_by || "hermes-browser",
       };
+      // Carried into job.yml.cover_required so finalize can auto-generate a cover.
+      role.cover_required = live.cover_required === true;
       mutated = true;
     }
 
@@ -569,9 +720,13 @@ async function main() {
       if (isDryRun) {
         console.log(`[dry-run] ${tag} — would fetch JD (skipped)`);
         jdSource = "dry-run (fetch skipped)";
+      } else if (isPlaceholderUrl(role.url) && !resolveUrl(role)) {
+        console.log(`[fetch] ${tag} — skipping JD fetch (placeholder URL ${role.url})`);
+        console.log(`           ℹ use source_url from jd_eval or report file`);
+        jdSource = `placeholder-url (${role.url})`;
       } else {
         console.log(`[fetch] ${tag} — fetching JD (no snapshot on queue)`);
-        const fetched = await fetchJd(role.url);
+        const fetched = await fetchJd(resolveUrl(role));
         if (fetched.ok) {
           jdText = fetched.text;
           jdSource = fetched.source;
@@ -580,6 +735,16 @@ async function main() {
           jdSource = `fetch-failed (${fetched.error})`;
         }
       }
+    }
+
+    // Repair placeholder identity before it becomes a folder path. Some batch-
+    // imported rows have job_slug === co_slug (and canonical_key co::co), so a
+    // second distinct role at the same company would collide on the SAME folder
+    // path and be wrongly blocked. Always derive the slug/key from the role title.
+    const titleSlug = slugify(normalizeTitle(role.role || "")) || role.job_slug;
+    if (titleSlug && (!role.job_slug || role.job_slug === role.co_slug)) role.job_slug = titleSlug;
+    if (!role.canonical_key || role.canonical_key === `${role.co_slug}::${role.co_slug}`) {
+      role.canonical_key = canonicalKey(role.co_slug, role.role);
     }
 
     const jobFolder = path.join(VAULT, "companies", role.co_slug, "jobs", role.job_slug);
@@ -592,6 +757,42 @@ async function main() {
         role.promotion = { ...(role.promotion || {}), error: `folder already exists at ${folderRel}` };
         role.notes = [...(role.notes || []), `${new Date().toISOString()} skip: folder exists`];
         continue;
+      }
+
+      // Cross-source canonical dedup: check if another folder for the same
+      // company+role combo already exists (different slug from different source).
+      // Prevents re-staging the same role scanned from a different job board.
+      // Keys are recomputed from company+title when the stored field is absent,
+      // so this also catches collisions against OLDER folders written before
+      // source_canonical_key existed (the cause of the camunda/alphasense dupes).
+      const roleKey = String(role.canonical_key || "").trim() || canonicalKey(role.co_slug, role.role);
+      if (roleKey && role.co_slug) {
+        const companyDir = path.join(VAULT, "companies", role.co_slug, "jobs");
+        if (fs.existsSync(companyDir)) {
+          const existingJobs = fs.readdirSync(companyDir).filter((d) => d !== role.job_slug);
+          for (const existingSlug of existingJobs) {
+            const existingYml = path.join(companyDir, existingSlug, "job.yml");
+            if (!fs.existsSync(existingYml)) continue;
+            const parsed = parseSimpleJobYml(fs.readFileSync(existingYml, "utf8"));
+            const existingStatus = String(parsed.status || "").trim();
+            // Only skip if existing is still active (not closed)
+            if (existingStatus === "closed" || existingStatus === "error") continue;
+            const existingKey = String(parsed.source_canonical_key || "").trim()
+              || canonicalKey(parsed.company_slug || role.co_slug, parsed.title || existingSlug);
+            if (existingKey && existingKey === roleKey) {
+              console.log(`           ⚠ cross-source duplicate detected: same canonical key "${roleKey}" already exists at ${existingSlug} (status=${existingStatus})`);
+              role.promotion = { ...(role.promotion || {}), error: `cross-source duplicate: canonical key matches ${existingSlug}` };
+              role.notes = [...(role.notes || []), `${new Date().toISOString()} skip: cross-source duplicate of ${existingSlug} (canonical key match)`];
+              if (!isDryRun) {
+                role.queue_state = "closed";
+                role.recommendation = "duplicate";
+              }
+              mutated = true;
+              break;
+            }
+          }
+          if (role.queue_state === "closed") continue;
+        }
       }
       fs.mkdirSync(jobFolder, { recursive: true });
       fs.writeFileSync(path.join(jobFolder, "job.yml"), renderJobYml(role));

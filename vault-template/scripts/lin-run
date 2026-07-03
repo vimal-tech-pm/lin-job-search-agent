@@ -1,21 +1,19 @@
 #!/usr/bin/env bash
 # One-shot Lin stage runner with the stage's pinned cron model+provider. Replaces the old
 # greenfield/paused-cron dance (cron run re-enables paused jobs — never do that).
-# Usage: lin-run <scan|score|stage|build|finalize|deep-prep|status|track> [args…] [-m MODEL] [--provider P]
+# Usage: lin-run <scan|score|stage|build|build-forge|finalize|deep-prep|status|track> [args…] [-m MODEL] [--provider P]
 # Examples:
 #   lin-run score --greenfield          # backlog drain, score's pinned model
 #   lin-run stage --top 25              # stage the 25 best eligible
-#   lin-run build                       # build staged folders on the frontier model
+#   lin-run build                       # build staged folders on the frontier model (dual-path)
+#   lin-run build-forge                 # Forge-only fastpath build
 #   lin-run build <co/slug> -m deepseek-v4-pro --provider opencode-go   # override model
 set -euo pipefail
 STAGE="${1:?usage: lin-run <stage> [args…] [-m MODEL] [--provider P]}"; shift
-case "$STAGE" in scan|score|stage|build|finalize|deep-prep|status|track) ;; *) echo "unknown stage: $STAGE" >&2; exit 2;; esac
+case "$STAGE" in scan|score|stage|build|build-forge|finalize|deep-prep|status|track) ;; *) echo "unknown stage: $STAGE" >&2; exit 2;; esac
 
 # track is pure script — no LLM, run the tracker directly
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-VAULT="$(dirname "$SCRIPT_DIR")"
-PROFILE_DIR="$(dirname "$VAULT")"
-[ "$STAGE" = track ] && exec node "$SCRIPT_DIR/lin-tracker.mjs"
+[ "$STAGE" = track ] && exec node ~/.hermes/profiles/lin/lin/scripts/lin-tracker.mjs
 
 MODEL="" PROVIDER="" ARGS=()
 while [ $# -gt 0 ]; do case "$1" in
@@ -25,11 +23,11 @@ while [ $# -gt 0 ]; do case "$1" in
 esac; done
 
 if [ -z "$MODEL" ] || [ -z "$PROVIDER" ]; then
-  read -r JMODEL JPROVIDER < <(LIN_PROFILE_DIR="$PROFILE_DIR" python3 - "$STAGE" <<'EOF'
-import json, sys
+  read -r JMODEL JPROVIDER < <(python3 - "$STAGE" <<'EOF'
+import json
+import os, sys
 try:
-    import os
-    jobs = json.load(open(os.path.join(os.environ["LIN_PROFILE_DIR"], "cron", "jobs.json")))["jobs"]
+    jobs = json.load(open(os.path.expanduser("~/.hermes/profiles/lin/cron/jobs.json")))["jobs"]
     j = next((j for j in jobs if j.get("id") == f"lin-{sys.argv[1]}"), None) or {}
 except Exception:
     j = {}
@@ -43,7 +41,7 @@ SKILL="lin-$STAGE"
 if [ ${#ARGS[@]} -gt 0 ]; then VERB="${ARGS[*]}"; else
   case "$STAGE" in
     scan) VERB="all";; score) VERB="all";; stage) VERB="auto";;
-    build) VERB="batch";; finalize) VERB="batch";; deep-prep) VERB="run";; status) VERB="check";;
+    build) VERB="batch";; build-forge) VERB="batch";; finalize) VERB="batch";; deep-prep) VERB="run";; status) VERB="check";;
   esac
 fi
 

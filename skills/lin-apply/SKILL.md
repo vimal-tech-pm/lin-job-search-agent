@@ -53,6 +53,9 @@ Interactive skill — respond in chat: confirmation line with what changed (`{co
 
 ## Gotchas
 
+> See also `references/user-provided-answer-drafts.md` for saving raw answer text the user pastes directly during chat.
+
 - Slugs come from the dashboard's first two columns (`coSlug`/`jobSlug`) or the folder path; queue rows that were never staged have **no** slug — use `#queue-id` with wont-apply, or `direct` for applications.
 - Re-running `apply` on an applied role is refused by design; correcting a mistake means editing job.yml + status-history by hand, deliberately.
 - `direct` exists so the tracker reflects reality; resist the urge to backfill materials for it.
+- **Dashboard Apply button may fail silently.** The dashboard's POST handler at `127.0.0.1:7777` can fail without visible feedback — the job stays `materials_ready` and doesn't appear in the Applied rail. The CLI fallback always works: `HOME=~ node scripts/lin-apply.mjs <co/slug> --yes --json`. If the user reports clicking Apply with no visible change, run the CLI command directly and verify the `job.yml` status. The script has the same guards (refuses re-apply, requires `materials_ready` + `ats_winner`).

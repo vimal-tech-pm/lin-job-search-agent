@@ -5,11 +5,11 @@
  * For a given job slug:
  *   1. Reads job.yml; resolves ats_winner + cover_winner.
  *   2. Surfaces winners at the job folder root with **recruiter-friendly filenames**:
- *        First_Last_Resume_{Company}_{YYYYMMDD}.pdf  (always — symlink to winner)
- *        First_Last_Resume_{Company}_{YYYYMMDD}.docx (only if FORGE won)
- *        First_Last_Cover_{Company}_{YYYYMMDD}.md    (only if `lin cover` was run)
+ *        Your_Name_Resume_{Company}_{YYYYMMDD}.pdf  (always — symlink to winner)
+ *        Your_Name_Resume_{Company}_{YYYYMMDD}.docx (only if FORGE won)
+ *        Your_Name_Cover_{Company}_{YYYYMMDD}.md    (only if `lin cover` was run)
  *      Date freezes to applied_at if the job has been applied, otherwise today.
- *      Any prior root-level final/First_Last_* files are cleaned up first
+ *      Any prior root-level final/Your_Name_* files are cleaned up first
  *      (idempotent — re-run safely after manual edits).
  *   3. Writes PACKAGE.md — the submit checklist with paths, JD URL, screening-question
  *      answers (parsed from job.md), and a pre-submit checklist.
@@ -28,6 +28,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { atsPlatform } from "./lib/tracker-data.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -90,7 +91,7 @@ function recruiterFilenames(fullName, coSlug, yml) {
 
 // Remove any root-level symlinks/files that look like a previously-staged final
 // artifact (old `final-resume.*` / `final-cover.*` from older Lin versions, or a
-// stale `First_Last_*` from a previous package run with a different date/winner).
+// stale `Your_Name_*` from a previous package run with a different date/winner).
 function cleanupStaleFinals(jobPath, currentNames) {
   const keep = new Set(Object.values(currentNames));
   for (const entry of fs.readdirSync(jobPath)) {
@@ -199,7 +200,31 @@ const sourceResumePdf = `resumes/${winner}.pdf`;
 const sourceResumeDocx = winner === "forge" ? "resumes/forge.docx" : null;
 const sourceCoverPdf = coverWinnerEngine ? `covers/${coverWinnerEngine}.pdf` : null;
 
-// Clean up any stale root-level finals (old final-* names, or First_Last_* from a
+function existsRel(relPath) {
+  return relPath && fs.existsSync(path.join(job.path, relPath));
+}
+
+function applicationAnswersRel() {
+  if (existsRel("application-answers.md")) return "application-answers.md";
+  if (existsRel("resumes/application-answers.md")) return "resumes/application-answers.md";
+  return null;
+}
+
+function backupFilesLine() {
+  const backup = [];
+  const otherPdf = `resumes/${winner === "forge" ? "pathfinder" : "forge"}.pdf`;
+  if (existsRel(otherPdf)) backup.push(`\`${otherPdf}\``);
+  if (winner !== "forge" && existsRel("resumes/forge.docx")) backup.push("`resumes/forge.docx`");
+  if (coverPresent) {
+    const otherCover = `covers/${coverWinnerEngine === "forge" ? "pathfinder" : "forge"}.md`;
+    if (existsRel(otherCover)) backup.push(`\`${otherCover}\``);
+  }
+  return backup.length
+    ? `**Backup files (do NOT submit unless prompted):** ${backup.join(", ")}.`
+    : "**Backup files:** none in this package.";
+}
+
+// Clean up any stale root-level finals (old final-* names, or Your_Name_* from a
 // previous package date / winner) before laying down fresh symlinks.
 cleanupStaleFinals(job.path, names);
 
@@ -228,12 +253,14 @@ const score = yml.pathfinder_score;
 const verdict = yml.pathfinder_verdict;
 const coverPresent = !!coverWinnerEngine;
 const applyUrl = yml.external_apply_url || yml.application_url || yml.source_url;
+// ATS platform detection — uses shared atsPlatform() from tracker-data.mjs
+const atsPlatformLabel = atsPlatform(applyUrl).label;
 const BUMPABLE_STATUSES = ["new", "decoding", "staged", "built"];
 const displayStatus = BUMPABLE_STATUSES.includes(yml.status) ? "materials_ready" : (yml.status || "materials_ready");
 
 const pkg = `# Application Package — ${yml.company_slug} / ${yml.title || yml.job_slug}
 
-**Status:** ${displayStatus} · **Packaged:** ${new Date().toISOString().slice(0, 10)} · **Apply to:** ${applyUrl || "—"}
+**Status:** ${displayStatus} · **ATS:** ${atsPlatformLabel} · **Packaged:** ${new Date().toISOString().slice(0, 10)} · **Apply to:** ${applyUrl || "—"}
 ${applyUrl && yml.source_url && applyUrl !== yml.source_url ? `**Original JD:** ${yml.source_url}\n` : ""}
 ${score ? `**PATHFINDER score:** ${score}/5${verdict ? ` · ${verdict}` : ""} · see [pathfinder-eval.md](pathfinder-eval.md)\n\n` : ""}---
 
@@ -242,17 +269,16 @@ ${score ? `**PATHFINDER score:** ${score}/5${verdict ? ` · ${verdict}` : ""} ·
 | Slot | File (upload as-is — already named for the recruiter) | Why |
 |---|---|---|
 | **Resume** | [\`${names.resumePdf}\`](${names.resumePdf}) | ATS winner = **${winner}**. See [resumes/ats-compare.md](resumes/ats-compare.md). |
-${winner === "forge" ? `| Resume (editable) | [\`${names.resumeDocx}\`](${names.resumeDocx}) | Editable backup if the form needs DOCX. |\n` : ""}${coverPresent ? `| **Cover letter** | [\`${names.coverPdf}\`](${names.coverPdf}) | Cover winner = **${coverWinnerEngine}**. One-page PDF, ready to submit. |\n` : `| _No cover letter generated._ | _Run \`lin cover ${job.slug}\` if the form asks for one._ | |\n`}
+${winner === "forge" && existsRel(sourceResumeDocx) ? `| Resume (editable) | [\`${names.resumeDocx}\`](${names.resumeDocx}) | Editable backup if the form needs DOCX. |\n` : ""}${coverPresent ? `| **Cover letter** | [\`${names.coverPdf}\`](${names.coverPdf}) | Cover winner = **${coverWinnerEngine}**. One-page PDF, ready to submit. |\n` : `| _No cover letter generated._ | _Run \`lin cover ${job.slug}\` if the form asks for one._ | |\n`}
 
-**Backup files (do NOT submit unless prompted):** \`resumes/${winner === "forge" ? "pathfinder" : "forge"}.pdf\`${winner === "forge" ? "" : ", `resumes/forge.docx`"}${coverPresent ? `, \`covers/${coverWinnerEngine === "forge" ? "pathfinder" : "forge"}.md\`` : ""}.
+${backupFilesLine()}
 
 ---
 
-${screeningSection ? `## Screening question answers\n\n${screeningSection}\n\n---\n\n` : ""}## Pre-submit checklist
+${applicationAnswersRel() ? `## Application answers\n\nSee [\`${applicationAnswersRel()}\`](${applicationAnswersRel()}) for drafted screening/application responses.\n\n---\n\n` : ""}${screeningSection ? `## Screening question answers\n\n${screeningSection}\n\n---\n\n` : ""}## Pre-submit checklist
 
 - [ ] Open \`${names.resumePdf}\` and sanity-check it renders cleanly.
-- [ ] If the form needs DOCX, use \`${names.resumeDocx}\` (only present if FORGE won).
-${coverPresent ? `- [ ] Open \`${names.coverPdf}\` and sanity-check it renders cleanly as a one-page letter.\n` : `- [ ] Cover letter NOT included by default. If the form requires one, run \`lin cover ${job.slug}\` and re-run packaging.\n`}- [ ] Submit on **${applyUrl || "the company's careers portal"}**.
+${existsRel(sourceResumeDocx) ? `- [ ] If the form needs DOCX, use \`${names.resumeDocx}\`.\n` : ""}${coverPresent ? `- [ ] Open \`${names.coverPdf}\` and sanity-check it renders cleanly as a one-page letter.\n` : `- [ ] Cover letter NOT included by default. If the form requires one, run \`lin cover ${job.slug}\` and re-run packaging.\n`}- [ ] Submit on **${applyUrl || "the company's careers portal"}**.
 - [ ] Run \`lin apply ${job.slug}\` immediately after submission to record the application.
 
 ---
@@ -287,7 +313,7 @@ spawnSync("node", [path.join(__dirname, "lin-tracker.mjs")], { stdio: "inherit" 
 // ---------- report ----------
 console.log(`✓ package    ${job.co}/${job.slug}`);
 console.log(`             ${names.resumePdf} → ${sourceResumePdf}`);
-if (winner === "forge") console.log(`             ${names.resumeDocx} → ${sourceResumeDocx}`);
+if (winner === "forge" && existsRel(sourceResumeDocx)) console.log(`             ${names.resumeDocx} → ${sourceResumeDocx}`);
 if (coverPresent) console.log(`             ${names.coverPdf} → ${sourceCoverPdf}`);
 else console.log(`             (no cover letter — run \`lin cover ${job.slug}\` if needed)`);
 console.log(`             PACKAGE.md regenerated`);

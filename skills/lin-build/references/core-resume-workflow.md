@@ -39,8 +39,8 @@ A "core resume" or "master resume" is a resume not tailored to a specific employ
    - Apply recency-tier bullet caps: Current (0-2y) ≤6, Recent (2-5y) ≤4, Prior (5-10y) ≤3, Early career (10+y) ≤2
    - **For long careers (7+ roles, 18+ years):** these caps may still produce 3 pages. Trim more aggressively (e.g., 3/2/2/1/1/1/1) and iterate. Always verify page count via `generate-pdf.mjs`.
    - Apply Self-Employed line-order exception: for any role with "Self-Employed" in the company line, put the role title in `job-company` (prominent) and "Self-Employed" in `job-role` (secondary).
-   - Write HTML to `/tmp/cv-candidate-Morgan-generic.html`
-   - Run: `node engines/pathfinder/generate-pdf.mjs /tmp/cv-candidate-Morgan-generic.html companies/generic/jobs/<role-slug>/resumes/pathfinder.pdf --format=letter`
+   - Write HTML to `/tmp/cv-your-name-generic.html`
+   - Run: `node engines/pathfinder/generate-pdf.mjs /tmp/cv-your-name-generic.html companies/generic/jobs/<role-slug>/resumes/pathfinder.pdf --format=letter`
    - Verify output says `Pages: 2`. If 3, trim bullets further and regenerate.
 
 7. **Run ATS compare** — compare FORGE and PATHFINDER output for keyword coverage, structural score, and qualitative pass. Write to `resumes/ats-compare.md`.
@@ -49,12 +49,12 @@ A "core resume" or "master resume" is a resume not tailored to a specific employ
 
 9. **Run `node scripts/lin-package.mjs <role-slug>`** — stages the recruiter-named symlink and refreshes PACKAGE.md + tracker.
 
-10. **Copy deliverables** to the user's preferred output folder (`$LIN_REAL_HOME/resumes/`):
-    - `First_Last_Resume_Generic_YYYYMMDD.pdf` (PATHFINDER winner, submit-ready)
-    - `First_Last_Master_Resume_FORGE.pdf` and `.docx` (editing draft)
-    - `First_Last_Master_Resume_PATHFINDER.pdf` (ATS-optimized)
-    - `First_Last_Master_Resume_ATS.txt` (plain-text fallback)
-    - `First_Last_Master_Resume_Narrative.md` (story-driven version for direct outreach)
+10. **Copy deliverables** to the user's preferred output folder (`~/resumes/`):
+    - `Your_Name_Resume_Generic_YYYYMMDD.pdf` (PATHFINDER winner, submit-ready)
+    - `Your_Name_Master_Resume_FORGE.pdf` and `.docx` (editing draft)
+    - `Your_Name_Master_Resume_PATHFINDER.pdf` (ATS-optimized)
+    - `Your_Name_Master_Resume_ATS.txt` (plain-text fallback)
+    - `Your_Name_Master_Resume_Narrative.md` (story-driven version for direct outreach)
     - `ATS_Compare_Generic_<Role>.md`
 
 ## Additional Output Versions
@@ -63,7 +63,7 @@ In addition to the two engine outputs, produce two hand-written versions:
 - **ATS plain text** (`.txt`): No formatting, no tables, keyword-dense. Use for portal text-entry fields (Workday, Greenhouse).
 - **Narrative markdown** (`.md`): Story-driven with impact table, grouped narrative bullets, tools/methods table. Use for direct outreach, networking, and hiring-manager conversations.
 
-Both are saved directly to `$LIN_REAL_HOME/resumes/`.
+Both are saved directly to `~/resumes/`.
 
 ## Key Differences from JD-Specific Intake
 

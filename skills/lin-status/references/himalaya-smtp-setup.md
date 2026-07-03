@@ -18,14 +18,14 @@ message.send.backend.auth.cmd = "secret-tool lookup service himalaya account you
 ## Verification
 
 ```bash
-HOME=$LIN_REAL_HOME himalaya account list
+HOME=~ himalaya account list
 # Should show: IMAP, SMTP
 ```
 
 ## Sending email with attachment (MML syntax)
 
 ```bash
-HOME=$LIN_REAL_HOME himalaya template send <<'MML'
+HOME=~ himalaya template send <<'MML'
 From: you@example.com
 To: recipient@example.com
 Subject: Subject line

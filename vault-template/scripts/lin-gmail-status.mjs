@@ -15,9 +15,12 @@
  */
 
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import yaml from 'yaml';
+import { emailSignals, foldEmailSignal, normalizeState, deriveStatus } from './lib/outcome.mjs';
+export { deriveStatus }; // re-exported: part of this module's tested surface
 
 const __dirname = path.dirname(new URL(import.meta.url).pathname);
 const VAULT = path.resolve(__dirname, '..');
@@ -35,18 +38,18 @@ const SINCE_DAYS = (() => {
   return idx !== -1 ? parseInt(ARGS[idx + 1], 10) || 7 : 7;
 })();
 const VERBOSE = ARGS.includes('--verbose') || !process.env.HERMES_CRON_RUN;
+const HIMALAYA_ENV = { ...process.env, HOME: '~' };
+const HIMALAYA_CONFIG = `${os.homedir()}/.config/himalaya/config.toml`;
+let GAPI_OK_CACHE = null;
+let HIMALAYA_STATUS_CACHE = null;
 
-function pythonBin() {
-  for (const bin of [process.env.PYTHON, 'python3', 'python'].filter(Boolean)) {
-    const r = spawnSync(bin, ['--version'], { encoding: 'utf8' });
-    if (r.status === 0) return bin;
-  }
-  return 'python3';
-}
-const PYTHON = pythonBin();
+const GAPI_DEPS = ['google-api-python-client', 'google-auth-oauthlib', 'google-auth-httplib2'];
 
 function runPython(script, args, opts = {}) {
-  return spawnSync(PYTHON, [script, ...args], {
+  // Use uv run to ensure google API deps are available (system python3 has no pip)
+  const cmd = 'uv';
+  const uvArgs = ['run', ...GAPI_DEPS.flatMap(d => ['--with', d]), 'python', script, ...args];
+  return spawnSync(cmd, uvArgs, {
     cwd: VAULT, encoding: 'utf8', maxBuffer: 10 * 1024 * 1024, ...opts,
   });
 }
@@ -62,15 +65,61 @@ function parseMaybeJson(stdout) {
 }
 
 function gapiAuthOk() {
-  if (!fs.existsSync(SETUP) || !fs.existsSync(GAPI)) return false;
+  if (GAPI_OK_CACHE !== null) return GAPI_OK_CACHE;
+  if (!fs.existsSync(SETUP) || !fs.existsSync(GAPI)) {
+    GAPI_OK_CACHE = false;
+    return GAPI_OK_CACHE;
+  }
   const r = runPython(SETUP, ['--check']);
-  return r.status === 0 && /AUTHENTICATED/.test(`${r.stdout}\n${r.stderr}`);
+  GAPI_OK_CACHE = r.status === 0 && /AUTHENTICATED/.test(`${r.stdout}\n${r.stderr}`);
+  return GAPI_OK_CACHE;
+}
+
+function runHimalaya(args, opts = {}) {
+  return spawnSync('himalaya', args, {
+    cwd: VAULT,
+    encoding: 'utf8',
+    maxBuffer: opts.maxBuffer || 5 * 1024 * 1024,
+    env: HIMALAYA_ENV,
+    timeout: opts.timeout || 30000,
+  });
+}
+
+function himalayaStatus() {
+  if (HIMALAYA_STATUS_CACHE) return HIMALAYA_STATUS_CACHE;
+  const version = spawnSync('himalaya', ['--version'], { encoding: 'utf8', timeout: 5000 });
+  if (version.status !== 0) {
+    HIMALAYA_STATUS_CACHE = { ok: false, reason: 'himalaya binary not available' };
+    return HIMALAYA_STATUS_CACHE;
+  }
+  if (!fs.existsSync(HIMALAYA_CONFIG)) {
+    HIMALAYA_STATUS_CACHE = { ok: false, reason: `missing config at ${HIMALAYA_CONFIG}` };
+    return HIMALAYA_STATUS_CACHE;
+  }
+
+  // `himalaya --version` only proves the CLI exists. In cron/headless sessions
+  // the configured auth command can block forever waiting for GNOME Keyring to
+  // unlock via a GUI prompt. Probe the real IMAP path once, with a hard timeout,
+  // before the per-company loop so one locked keyring cannot turn 75 applied jobs
+  // into 75 slow timeouts.
+  const probe = runHimalaya(['envelope', 'list', '--folder', 'INBOX', '--page-size', '1', '-o', 'json'], { timeout: 12000, maxBuffer: 1024 * 1024 });
+  if (probe.status === 0) {
+    HIMALAYA_STATUS_CACHE = { ok: true, reason: 'ok' };
+    return HIMALAYA_STATUS_CACHE;
+  }
+  const output = `${probe.stderr || ''}\n${probe.stdout || ''}`.trim().replace(/\s+/g, ' ');
+  const timedOut = probe.error?.code === 'ETIMEDOUT' || probe.signal === 'SIGTERM' || probe.status === null;
+  HIMALAYA_STATUS_CACHE = {
+    ok: false,
+    reason: timedOut
+      ? 'himalaya credential helper timed out (likely locked GNOME Keyring / secret-tool in headless cron)'
+      : `himalaya IMAP probe failed${output ? `: ${output.slice(0, 240)}` : ''}`,
+  };
+  return HIMALAYA_STATUS_CACHE;
 }
 
 function himalayaOk() {
-  const r = spawnSync('himalaya', ['--version'], { encoding: 'utf8' });
-  if (r.status !== 0) return false;
-  return fs.existsSync(path.join(process.env.LIN_REAL_HOME || process.env.HOME, '.config/himalaya/config.toml'));
+  return himalayaStatus().ok;
 }
 
 function loadAppliedJobs() {
@@ -108,12 +157,37 @@ function companyDisplayName(coSlug) {
   } catch { return coSlug; }
 }
 
-function classify(body, subject) {
+export function classify(body, subject) {
   const text = `${subject} ${body}`.toLowerCase();
+  const subj = String(subject || '').toLowerCase();
+
   if (/unfortunately|not moving forward|will not be moving|no longer|regret to inform|not been selected|decided to pursue other|not able to offer|position has been filled|won't be able to move forward/i.test(text)) return 'rejection';
-  if (/interview|phone screen|schedule a call|would like to speak|next steps.*call|meet the team|video call|zoom|book a time|availability for a call/i.test(text)) return 'interview';
   if (/pleased to offer|delighted to extend|offer letter|congratulations.*offer|position.*offered/i.test(text)) return 'offer';
-  if (/thank you for (applying|your application)|application received|we have received|application.*submitted|on file/i.test(text)) return 'acknowledgement';
+
+  // Ignore job-alert/digest emails. They often contain words like "Ready to
+  // Interview" but are not status updates for an application.
+  if (/^new jobs?:/.test(subj) || /ready to interview\s+open to offers\s+closed to offers/i.test(text)) return 'other';
+
+  const ack = /thank you for (applying|your application)|thanks for applying|application received|we(?:'|’)ve received your application|we have received|application.*submitted|your application has been submitted|on file/i.test(text);
+  const conditionalInterviewBoilerplate = /if\s+(?:your qualifications align|there(?:'|’)s a match|selected|you(?:'|’)re selected|you are selected|your application is a good fit|you qualify|your profile matches)[\s\S]{0,180}\b(interview|email introduction|next steps?|reach out|be in touch|contact you|schedule)/i.test(text);
+
+  const explicitInterview = /\binterview with\b/i.test(subj)
+    || /\blet(?:'|’)s talk\b/i.test(subj)
+    || /get to know you call/i.test(text)
+    || /we(?:'|’)d like to move to the next step[\s\S]{0,120}\binterview/i.test(text)
+    || /we would like to move to the next step[\s\S]{0,120}\binterview/i.test(text)
+    || /we(?:'|’)d like to (?:schedule|speak|meet|invite)/i.test(text)
+    || /we would like to (?:schedule|speak|meet|invite)/i.test(text)
+    || /would like to speak/i.test(text)
+    || /we have scheduled your next interview/i.test(text)
+    || /sent (?:a )?(?:google meet|calendar|teams) invite/i.test(text)
+    || /\b(?:phone|recruiter) screen\b/i.test(text)
+    || /next steps?.{0,80}\bcall/i.test(text)
+    || /meet the team|video call|\bzoom\b/i.test(text)
+    || (/microsoft teams meeting/i.test(text) && /\binterview\b/i.test(text));
+
+  if (explicitInterview && !conditionalInterviewBoilerplate) return 'interview';
+  if (ack) return 'acknowledgement';
   return 'other';
 }
 
@@ -121,13 +195,23 @@ function statusIcon(cls) {
   return { rejection: '❌', interview: '🎙️', offer: '🎉', acknowledgement: '📨' }[cls] || '  ';
 }
 
-function updateJobStatus(ymlPath, newStatus, detail) {
+export function updateJobStatus(ymlPath, newStatus, detail, state) {
   const raw = fs.readFileSync(ymlPath, 'utf8');
   const job = yaml.parse(raw);
   const now = new Date().toISOString();
   if (newStatus) {
     job.status = newStatus;
     job.status_detail = detail;
+  }
+  // Persist the outcome funnel fields. `state` already has manual values preserved
+  // (foldMatchesIntoJob/the lib guarantee it), so this write can't drop a manual flag.
+  if (state) {
+    if (state.outcome !== null && state.outcome !== undefined) {
+      job.outcome = state.outcome;
+      job.outcome_source = state.outcome_source || 'email';
+    }
+    job.furthest_stage = state.furthest_stage;
+    job.furthest_stage_source = state.furthest_stage_source || (state.furthest_stage !== 'none' ? 'email' : null);
   }
   job.last_email_check = now;
   job.last_email_status = detail || 'silent';
@@ -178,32 +262,31 @@ function searchViaGapi(companyName) {
 // ── Himalaya fallback ──
 function searchViaHimalaya(companyName) {
   const results = [];
-  const homeEnv = { ...process.env, HOME: process.env.LIN_REAL_HOME || process.env.HOME };
   const seenSubjects = new Set();
 
   // Try 2 variants: exact, lowercase
   for (const variant of [companyName, companyName.toLowerCase()]) {
     if (results.length >= 5) break;
     try {
-      const r = spawnSync('himalaya', [
-        'envelope', 'list', '--folder', 'INBOX', '--page-size', '200', '--max-width', '400',
+      const r = runHimalaya([
+        'envelope', 'list', '--folder', 'INBOX', '--page-size', '200', '-o', 'json',
         variant,
-      ], { cwd: VAULT, encoding: 'utf8', maxBuffer: 5 * 1024 * 1024, env: homeEnv, timeout: 30000 });
+      ], { timeout: 30000 });
       if (r.status !== 0) continue;
 
-      const lines = String(r.stdout).split('\n');
-      for (const line of lines) {
-        const parts = line.split('|').map(s => s.trim()).filter(Boolean);
-        if (parts.length < 4) continue;
-        const id = parts[0], subject = parts[2] || '', from = parts[3] || '', date = parts[4] || '';
+      for (const e of parseMaybeJson(r.stdout) || []) {
+        const id = String(e.id || '');
+        const subject = e.subject || '';
+        const from = e.from ? `${e.from.name || ''} <${e.from.addr || ''}>` : '';
+        const date = e.date || '';
+        if (!id) continue;
         if (!(subject + from).toLowerCase().includes(companyName.toLowerCase())) continue;
         if (seenSubjects.has(subject)) continue;
         seenSubjects.add(subject);
 
         let body = '';
         try {
-          const br = spawnSync('himalaya', ['message', 'read', id],
-            { cwd: VAULT, encoding: 'utf8', maxBuffer: 2 * 1024 * 1024, env: homeEnv, timeout: 15000 });
+          const br = runHimalaya(['message', 'read', id], { maxBuffer: 2 * 1024 * 1024, timeout: 15000 });
           if (br.status === 0) body = String(br.stdout).slice(0, 2000);
         } catch {}
 
@@ -217,14 +300,14 @@ function searchViaHimalaya(companyName) {
 
 function searchGmail(companyName) {
   if (gapiAuthOk()) return searchViaGapi(companyName);
-  if (himalayaOk()) return searchViaHimalaya(companyName);
   return [];
 }
 
 // ── MAIN ──
 function main() {
-  if (!gapiAuthOk() && !himalayaOk()) {
-    console.log('Gmail not reachable: neither GAPI nor himalaya available. Exit clean.');
+  const gapiOk = gapiAuthOk();
+  if (!gapiOk) {
+    console.log(`Gmail not reachable: GAPI token missing/invalid. Exit clean.`);
     process.exit(0);
   }
 
@@ -247,16 +330,23 @@ function main() {
     for (const m of matches) findings.push({ job, match: m, classification: m.classification });
 
     if (WRITE) {
-      const actionable = matches.find(m => ['rejection', 'interview', 'offer'].includes(m.classification));
+      // Fold the full set of emails into the job's outcome state (high-water mark +
+      // latest terminal outcome), preserving any manual fields, then derive the
+      // back-compat forward status from the result.
+      const jobYml = yaml.parse(fs.readFileSync(job.ymlPath, 'utf8'));
+      const before = jobOutcomeState(jobYml);
+      const state = foldMatchesIntoJob(jobYml, matches);
+      const actionable = [...matches]
+        .sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')))
+        .reverse()
+        .find(m => ['rejection', 'interview', 'offer'].includes(m.classification));
       if (actionable) {
-        const newStatus = actionable.classification === 'rejection' ? 'closed' : actionable.classification === 'interview' ? 'interviewing' : 'offer';
-        updateJobStatus(job.ymlPath, newStatus, `${actionable.classification}: ${actionable.subject} (${actionable.date})`);
-        updated++;
+        updateJobStatus(job.ymlPath, deriveStatus(state), `${actionable.classification}: ${actionable.subject} (${actionable.date})`, state);
+        if (JSON.stringify(before) !== JSON.stringify(state)) updated++;
       } else {
-        // Record check even when silent
         const ack = matches.find(m => m.classification === 'acknowledgement');
-        const status = ack ? `acknowledged: ${ack.subject.slice(0, 80)}` : 'silent';
-        updateJobStatus(job.ymlPath, null, status);
+        const detail = ack ? `acknowledged: ${ack.subject.slice(0, 80)}` : 'silent';
+        updateJobStatus(job.ymlPath, null, detail, state);
       }
     }
   }
@@ -289,4 +379,30 @@ function main() {
   }
 }
 
-main();
+// ── pure helpers (exported for tests) ──
+
+// Read a job's persisted outcome fields into the canonical four-field state.
+export function jobOutcomeState(job) {
+  return normalizeState({
+    outcome: job?.outcome,
+    furthest_stage: job?.furthest_stage,
+    outcome_source: job?.outcome_source,
+    furthest_stage_source: job?.furthest_stage_source,
+  });
+}
+
+// Fold every classified email (oldest→newest) into the job's outcome state so the
+// high-water mark builds up and the latest terminal email wins the outcome. Manual
+// fields are never clobbered (the lib enforces that).
+export function foldMatchesIntoJob(job, matches) {
+  const ordered = [...(matches || [])].sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')));
+  let state = jobOutcomeState(job);
+  for (const m of ordered) {
+    state = foldEmailSignal(state, emailSignals(m.classification, `${m.subject || ''} ${m.snippet || ''}`));
+  }
+  return state;
+}
+
+if (path.resolve(process.argv[1] || '') === path.resolve(new URL(import.meta.url).pathname)) {
+  main();
+}

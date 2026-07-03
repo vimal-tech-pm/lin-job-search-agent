@@ -13,6 +13,15 @@ Lin turns job postings into tailored, submit-ready application packages and trac
 
 🎭 **[Live demo (fictional data)](https://lin-job-search-agent.pages.dev/demo/)** · 🌐 **[Project page](https://lin-job-search-agent.pages.dev/)** · 📖 [Case studies](https://vimalsekar-portfolio.pages.dev/work/lin/)
 
+## What's new (2026-07 sync)
+
+- **Outcome funnel**: every pursued application now tracks `outcome` × `furthest_stage` (rejected/withdrew/declined/expired × applied/interviewing/final/offer), inferred from email with sticky manual override (`lin-set-outcome.mjs`); real applied→interview→final→offer conversion analytics
+- **Geo-eligibility gate** (`lib/geo-gate.mjs`): auto-pipeline skips postings you can't legally take, with a manual override path
+- **Canonical dedup** (`lib/canonical.mjs` + `lin-dedup-backfill.mjs`): one identity per posting across discovery channels
+- **ATS platform detection**: apply URLs classified (Greenhouse/Ashby/Workday/…) for sort + filter
+- **Forge fastpath**: single-engine build lane (`lin-run build-forge`) when the A/B compare isn't worth the spend
+- **Lin Today companion dashboard** (`lin-today-data.mjs`): read-only daily-decision page — interviews in flight, follow-ups due, what changed since yesterday, pipeline funnel, top staged
+
 ## Why it's shaped this way
 
 Eleven small skills own the workflows; ten thin cron jobs (prompts ≤ 2 lines) only schedule them; deterministic Node scripts do everything that doesn't need a model; and **only the resume-writing stage uses an expensive model** — everything else runs on cheap ones or none at all. Every stage is equally runnable manually (`/lin` chat verbs, `bin/lin-run` pinned-model one-shots, dashboard buttons). 60 automated tests, including a real-browser click-through.

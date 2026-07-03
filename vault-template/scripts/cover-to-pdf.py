@@ -1,8 +1,9 @@
+import os
 #!/usr/bin/env python3
 """Convert cover letter markdown to HTML, then render to PDF via generate-pdf.mjs."""
 import sys, os, re, subprocess, tempfile
 
-BASE = str(Path(__file__).resolve().parents[1])
+BASE = os.path.expanduser("~/.hermes/profiles/lin/lin")
 PDF_SCRIPT = os.path.join(BASE, "engines/pathfinder/generate-pdf.mjs")
 
 def md_to_html(md_path):
@@ -75,7 +76,7 @@ def md_to_html(md_path):
                 sig = sig.strip()
                 if not sig:
                     continue
-                if sig.startswith('Alex Morgan'):
+                if sig.startswith('Jane Doe'):
                     html += f'<p><strong>{sig}</strong></p>\n'
                 else:
                     html += f'<p>{md_links(sig)}</p>\n'
@@ -96,7 +97,7 @@ def render_pdf(md_path, pdf_path):
     result = subprocess.run(
         ['node', PDF_SCRIPT, html_path, pdf_path, '--format=letter'],
         cwd=BASE, capture_output=True, text=True, timeout=30,
-        env={**os.environ, 'HOME': os.environ.get('LIN_REAL_HOME', os.environ['HOME'])}
+        env={**os.environ, 'HOME': '~'}
     )
     if result.returncode != 0:
         print(f"ERROR rendering {pdf_path}: {result.stderr}")

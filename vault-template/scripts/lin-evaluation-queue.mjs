@@ -211,7 +211,7 @@ function parseReport(reportPath) {
 
 // ----- geo gate inference -----
 
-// the candidate is Toronto, targets Canada/US-remote. blocks_stage=true only on an
+// the applicant is Toronto, targets Canada/US-remote. blocks_stage=true only on an
 // explicit onsite-only / visa-blocked / non-remote-foreign signal. Default
 // permissive (the plan: "default `{reason:null, blocks_stage:false}`").
 function inferGeoGate(remoteSignal, location) {
@@ -599,10 +599,9 @@ function requestBuild(argv) {
   if (["applied", "closed", "skipped", "duplicate", "error"].includes(role.queue_state)) {
     console.error(`row ${id} is terminal (${role.queue_state}); refusing`); process.exit(1);
   }
-  const floor = Number(readPipelineConfig().promote_threshold ?? 3.95);
-  if (!clear && Number(role.score) < floor) {
-    console.error(`row ${id} score ${role.score} < promote_threshold ${floor}; refusing`); process.exit(1);
-  }
+  // No score-floor gate: a build-request is an explicit superuser decision (dashboard
+  // Prepare click or manual --id) and intentionally builds below-floor roles. The cron's
+  // auto top-N still respects auto_build_floor; only this explicit path overrides it.
   role.build_requested = !clear;
   role.build_requested_at = clear ? null : nowIso();
   role.updated_at = nowIso();

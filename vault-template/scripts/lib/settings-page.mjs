@@ -12,8 +12,8 @@ export const PROFILE_FILES = ["resume.md", "experience.md", "cover-letter-base.m
 
 // key → [section, label, hint, min, max, isFloat]
 export const CONFIG_FIELDS = {
-  "auto_build_floor":        ["Build trigger", "Auto-build floor", "auto-build only roles scoring ≥ this", 3, 5, true],
-  "auto_build_top_n":        ["Build trigger", "Auto-build top-N", "max auto-built roles per stage run", 0, 20, false],
+  "auto_build_floor":        ["Build trigger", "Auto-build floor", "absolute score cutoff for auto-builds (junk floor, not a daily cap)", 3, 5, true],
+  "auto_build_top_n":        ["Build trigger", "Auto-build top-N", "applyable roles kept prepared daily (top by score); a Prepare click overrides the floor", 0, 20, false],
   "promote_threshold":       ["Build trigger", "Eligibility floor", "below this a role can't be staged or flagged", 3, 5, true],
   "promote_limit":           ["Build trigger", "Promote limit", "max promotions per stage run", 1, 100, false],
   "prepare_retry_budget":    ["Build trigger", "Gate retry budget", "quality-gate retries per resume", 0, 3, false],

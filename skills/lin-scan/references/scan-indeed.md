@@ -30,9 +30,10 @@ shared **§channel-scan** contract for the `indeed` channel.
       "url":"https://ca.indeed.com/viewjob?jk=abc123",
       "source":"indeed","source_query":"PM — Remote CA",
       "source_item_id":"abc123","seen_at":"2026-06-04T…Z",
+      "posted_date":"2026-06-02",
       "confidence":"high","notes":"" }]
    ```
-   Write it to a temp file, e.g. `/tmp/lin-indeed-candidates.json`.
+   Write it to a temp file, e.g. `/tmp/lin-indeed-candidates.json`. (Indeed shows "Posted N days ago" / "Just posted" — convert to an ISO `posted_date`; omit when absent.)
 5. **Funnel through the deterministic helper:**
    ```bash
    node scripts/lin-discovery-append.mjs --source indeed --file /tmp/lin-indeed-candidates.json

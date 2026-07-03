@@ -36,7 +36,7 @@ User reviews digest
 | ID | Schedule | What it does | Paused? |
 |---|---|---|---|
 | `lin01dailyscan` | M-F 6:30 AM | Scan → pipeline eval → Telegram digest | Yes — needs logged-in CDP browser |
-| `lin02weeklytrk` | Mon 9 AM | Read-only tracker summary + win-rate | Yes — safe to enable anytime |
+| `lin02weeklytrk` | Mon 9 AM | Read-only tracker summary + outcome funnel + engine usage | Yes — safe to enable anytime |
 | `lin03followups` | M-F 6 PM | Nudge stale applied jobs (> 7 days) | Yes — enable after first applications |
 
 ## Scoring Thresholds (PATHFINDER 0-5 scale)

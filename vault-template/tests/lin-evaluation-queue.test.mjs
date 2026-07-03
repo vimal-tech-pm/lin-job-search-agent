@@ -243,7 +243,7 @@ test('request-build sets and clears the flag on an eligible row', () => {
   assert.equal(role.build_requested_at, null);
 });
 
-test('request-build refuses terminal rows and sub-threshold scores', () => {
+test('request-build refuses terminal rows but accepts below-floor (superuser override)', () => {
   const vault = makeVault([
     makeRole({ id: '320', queue_state: 'applied' }),
     makeRole({ id: '321', score: 3.5 }),
@@ -251,9 +251,10 @@ test('request-build refuses terminal rows and sub-threshold scores', () => {
   const terminal = runScript(vault, ['request-build', '--id', '320']);
   assert.notEqual(terminal.status, 0);
   assert.match(terminal.stderr, /terminal/);
+  // below-floor is intentionally allowed — an explicit request is the superuser's call
   const low = runScript(vault, ['request-build', '--id', '321']);
-  assert.notEqual(low.status, 0);
-  assert.match(low.stderr, /promote_threshold/);
+  assert.equal(low.status, 0, low.stderr || low.stdout);
+  assert.equal(readQueue(vault).roles.find((r) => r.id === '321').build_requested, true);
 });
 
 test('reclassify syncs a built job folder into queue_state built', () => {

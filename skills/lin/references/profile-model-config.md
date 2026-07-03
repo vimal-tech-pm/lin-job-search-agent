@@ -8,10 +8,10 @@ Hermes profiles are isolated. A named profile does not reliably inherit `model.*
 
 ## Paths to compare
 
-- Default profile config: `$LIN_REAL_HOME/.hermes/config.yaml`
-- Lin profile config: `$LIN_REAL_HOME/.hermes/profiles/lin/config.yaml`
-- Finance profile config: `$LIN_REAL_HOME/.hermes/profiles/finance/config.yaml`
-- Ironman profile config: `$LIN_REAL_HOME/.hermes/profiles/ironman/config.yaml`
+- Default profile config: `~/.hermes/config.yaml`
+- Lin profile config: `~/.hermes/profiles/lin/config.yaml`
+- Finance profile config: `~/.hermes/profiles/finance/config.yaml`
+- Ironman profile config: `~/.hermes/profiles/ironman/config.yaml`
 
 Useful checks:
 
@@ -23,10 +23,10 @@ python3 - <<'PY'
 from pathlib import Path
 import yaml
 for name,path in {
-  'default': Path('$LIN_REAL_HOME/.hermes/config.yaml'),
-  'lin': Path('$LIN_REAL_HOME/.hermes/profiles/lin/config.yaml'),
-  'finance': Path('$LIN_REAL_HOME/.hermes/profiles/finance/config.yaml'),
-  'ironman': Path('$LIN_REAL_HOME/.hermes/profiles/ironman/config.yaml'),
+  'default': Path('~/.hermes/config.yaml'),
+  'lin': Path('~/.hermes/profiles/lin/config.yaml'),
+  'finance': Path('~/.hermes/profiles/finance/config.yaml'),
+  'ironman': Path('~/.hermes/profiles/ironman/config.yaml'),
 }.items():
     data = yaml.safe_load(path.read_text()) or {} if path.exists() else {}
     print(name, data.get('model'))
@@ -56,18 +56,18 @@ Finance/ironman may show `—` in `hermes profile list` because their profile co
 
 ## Recommended answer pattern
 
-When the candidate asks “why is Lin on GLM?”:
+When the user asks “why is Lin on GLM?”:
 
 1. Compare the actual config files first.
 2. State clearly whether Lin has an explicit `model:` override.
 3. Explain `/model` without `--global` is session-only.
-4. If the candidate says Lin should behave like finance/ironman, treat that as a request to remove Lin's profile-level `model:` block, not to pin Lin to the current default model. Finance/ironman-style behavior means `model: None` in the profile config and `Model: —` in `hermes profile list`.
+4. If the user says Lin should behave like finance/ironman, treat that as a request to remove Lin's profile-level `model:` block, not to pin Lin to the current default model. Finance/ironman-style behavior means `model: None` in the profile config and `Model: —` in `hermes profile list`.
 
 ## Safe remediation workflow
 
 When removing an unwanted Lin model override:
 
-1. Back up `$LIN_REAL_HOME/.hermes/profiles/lin/config.yaml` before editing.
+1. Back up `~/.hermes/profiles/lin/config.yaml` before editing.
 2. Remove only the top-level `model:` block from Lin's config. Do not touch API keys or unrelated profile settings.
 3. Verify Lin, finance, and ironman all report no profile-local model:
    ```bash
@@ -75,9 +75,9 @@ When removing an unwanted Lin model override:
    from pathlib import Path
    import yaml
    for name,path in {
-     'lin': Path('$LIN_REAL_HOME/.hermes/profiles/lin/config.yaml'),
-     'finance': Path('$LIN_REAL_HOME/.hermes/profiles/finance/config.yaml'),
-     'ironman': Path('$LIN_REAL_HOME/.hermes/profiles/ironman/config.yaml'),
+     'lin': Path('~/.hermes/profiles/lin/config.yaml'),
+     'finance': Path('~/.hermes/profiles/finance/config.yaml'),
+     'ironman': Path('~/.hermes/profiles/ironman/config.yaml'),
    }.items():
        data = yaml.safe_load(path.read_text()) or {}
        print(f"{name}: config model = {data.get('model')}")
